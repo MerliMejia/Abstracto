@@ -1,5 +1,10 @@
 #pragma once
 #include "RenderUtils.h"
+#include <array>
+#include <cstring>
+#include <stdexcept>
+#include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
@@ -54,51 +59,20 @@ template <> struct std::hash<Vertex> {
 
 class Mesh {
 public:
-  void setGeometry(std::vector<Vertex> meshVertices,
-                   std::vector<uint32_t> meshIndices) {
-    vertices = std::move(meshVertices);
-    indices = std::move(meshIndices);
-  }
-
-  void loadModel(std::string path) {
-    tinyobj::attrib_t attrib;
-    std::vector<tinyobj::shape_t> shapes;
-    std::vector<tinyobj::material_t> materials;
-    std::string warn, err;
-
-    if (!LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str())) {
-      throw std::runtime_error(warn + err);
-    }
-
-    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
-
-    for (const auto &shape : shapes) {
-      for (const auto &index : shape.mesh.indices) {
-        Vertex vertex{};
-
-        vertex.pos = {attrib.vertices[3 * index.vertex_index + 0],
-                      attrib.vertices[3 * index.vertex_index + 1],
-                      attrib.vertices[3 * index.vertex_index + 2]};
-
-        vertex.texCoord = {attrib.texcoords[2 * index.texcoord_index + 0],
-                           1.0f -
-                               attrib.texcoords[2 * index.texcoord_index + 1]};
-
-        vertex.color = {1.0f, 1.0f, 1.0f};
-
-        if (!uniqueVertices.contains(vertex)) {
-          uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-          vertices.push_back(vertex);
-        }
-
-        indices.push_back(uniqueVertices[vertex]);
-      }
-    }
-  }
+  virtual ~Mesh() = default;
+  Mesh() = default;
+  Mesh(const Mesh &) = delete;
+  Mesh &operator=(const Mesh &) = delete;
+  Mesh(Mesh &&) noexcept = default;
+  Mesh &operator=(Mesh &&) noexcept = default;
 
   void createVertexBuffer(CommandContext &commandContext,
                           DeviceContext &deviceContext) {
-    vk::DeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+    if (vertexBytes.empty()) {
+      throw std::runtime_error("cannot create a vertex buffer with no vertices");
+    }
+
+    vk::DeviceSize bufferSize = vertexBytes.size();
     vk::raii::Buffer stagingBuffer({});
     vk::raii::DeviceMemory stagingBufferMemory({});
     RenderUtils::createBuffer(deviceContext, bufferSize,
@@ -108,7 +82,7 @@ public:
                               stagingBuffer, stagingBufferMemory);
 
     void *dataStaging = stagingBufferMemory.mapMemory(0, bufferSize);
-    memcpy(dataStaging, vertices.data(), bufferSize);
+    std::memcpy(dataStaging, vertexBytes.data(), bufferSize);
     stagingBufferMemory.unmapMemory();
 
     RenderUtils::createBuffer(deviceContext, bufferSize,
@@ -123,6 +97,10 @@ public:
 
   void createIndexBuffer(CommandContext &commandContext,
                          DeviceContext &deviceContext) {
+    if (indices.empty()) {
+      throw std::runtime_error("cannot create an index buffer with no indices");
+    }
+
     vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
 
     vk::raii::Buffer stagingBuffer({});
@@ -150,12 +128,172 @@ public:
   vk::raii::Buffer &getVertexBuffer() { return vertexBuffer; }
   vk::raii::Buffer &getIndexBuffer() { return indexBuffer; }
   std::vector<uint32_t> &getIndices() { return indices; }
+  const std::vector<uint32_t> &getIndices() const { return indices; }
+  size_t vertexCount() const { return vertexCountValue; }
+  size_t vertexStride() const { return vertexStrideValue; }
+
+protected:
+  template <typename TVertex>
+  void setTypedGeometry(std::vector<TVertex> meshVertices,
+                        std::vector<uint32_t> meshIndices) {
+    static_assert(std::is_trivially_copyable_v<TVertex>,
+                  "Mesh vertex types must be trivially copyable");
+
+    vertexStrideValue = sizeof(TVertex);
+    vertexCountValue = meshVertices.size();
+    vertexBytes.resize(vertexStrideValue * vertexCountValue);
+    if (!meshVertices.empty()) {
+      std::memcpy(vertexBytes.data(), meshVertices.data(), vertexBytes.size());
+    }
+    indices = std::move(meshIndices);
+  }
+
+  void clearGeometry() {
+    vertexBytes.clear();
+    indices.clear();
+    vertexStrideValue = 0;
+    vertexCountValue = 0;
+  }
 
 private:
-  std::vector<Vertex> vertices;
+  std::vector<std::byte> vertexBytes;
   std::vector<uint32_t> indices;
+  size_t vertexStrideValue = 0;
+  size_t vertexCountValue = 0;
   vk::raii::Buffer vertexBuffer = nullptr;
   vk::raii::DeviceMemory vertexBufferMemory = nullptr;
   vk::raii::Buffer indexBuffer = nullptr;
   vk::raii::DeviceMemory indexBufferMemory = nullptr;
 };
+
+template <typename TVertex> class TypedMesh : public Mesh {
+public:
+  using VertexType = TVertex;
+  TypedMesh() = default;
+  TypedMesh(const TypedMesh &) = delete;
+  TypedMesh &operator=(const TypedMesh &) = delete;
+  TypedMesh(TypedMesh &&) noexcept = default;
+  TypedMesh &operator=(TypedMesh &&) noexcept = default;
+
+  void setGeometry(std::vector<TVertex> meshVertices,
+                   std::vector<uint32_t> meshIndices) {
+    vertices = std::move(meshVertices);
+    Mesh::setTypedGeometry(vertices, std::move(meshIndices));
+  }
+
+  const std::vector<TVertex> &vertexData() const { return vertices; }
+
+protected:
+  std::vector<TVertex> &mutableVertexData() { return vertices; }
+
+private:
+  std::vector<TVertex> vertices;
+};
+
+struct ObjData {
+  tinyobj::attrib_t attrib;
+  std::vector<tinyobj::shape_t> shapes;
+  std::vector<tinyobj::material_t> materials;
+};
+
+class ObjVertexRef {
+public:
+  ObjVertexRef(const tinyobj::attrib_t &attribData, tinyobj::index_t objIndex)
+      : attrib(&attribData),
+        index(objIndex) {}
+
+  glm::vec3 position() const {
+    if (index.vertex_index < 0) {
+      throw std::runtime_error("OBJ vertex is missing a position index");
+    }
+
+    return {attrib->vertices[3 * index.vertex_index + 0],
+            attrib->vertices[3 * index.vertex_index + 1],
+            attrib->vertices[3 * index.vertex_index + 2]};
+  }
+
+  glm::vec2 texCoord() const {
+    if (!hasTexCoord()) {
+      return {0.0f, 0.0f};
+    }
+
+    return {attrib->texcoords[2 * index.texcoord_index + 0],
+            1.0f - attrib->texcoords[2 * index.texcoord_index + 1]};
+  }
+
+  glm::vec3 normal() const {
+    if (!hasNormal()) {
+      return {0.0f, 0.0f, 0.0f};
+    }
+
+    return {attrib->normals[3 * index.normal_index + 0],
+            attrib->normals[3 * index.normal_index + 1],
+            attrib->normals[3 * index.normal_index + 2]};
+  }
+
+  bool hasTexCoord() const {
+    return index.texcoord_index >= 0 &&
+           (2 * index.texcoord_index + 1) <
+               static_cast<int>(attrib->texcoords.size());
+  }
+
+  bool hasNormal() const {
+    return index.normal_index >= 0 &&
+           (3 * index.normal_index + 2) <
+               static_cast<int>(attrib->normals.size());
+  }
+
+private:
+  const tinyobj::attrib_t *attrib = nullptr;
+  tinyobj::index_t index{};
+};
+
+inline ObjData loadObjData(const std::string &path) {
+  ObjData data;
+  std::string warn, err;
+
+  if (!LoadObj(&data.attrib, &data.shapes, &data.materials, &warn, &err,
+               path.c_str())) {
+    throw std::runtime_error(warn + err);
+  }
+
+  return data;
+}
+
+template <typename TVertex, typename TVertexFactory>
+TypedMesh<TVertex> buildMeshFromObj(const ObjData &objData,
+                                    TVertexFactory &&vertexFactory) {
+  std::vector<TVertex> meshVertices;
+  std::vector<uint32_t> meshIndices;
+
+  for (const auto &shape : objData.shapes) {
+    for (const auto &index : shape.mesh.indices) {
+      ObjVertexRef objVertex(objData.attrib, index);
+      meshVertices.push_back(vertexFactory(objVertex));
+      meshIndices.push_back(static_cast<uint32_t>(meshVertices.size() - 1));
+    }
+  }
+
+  TypedMesh<TVertex> mesh;
+  mesh.setGeometry(std::move(meshVertices), std::move(meshIndices));
+  return mesh;
+}
+
+class ObjMesh : public TypedMesh<Vertex> {
+public:
+  void loadModel(const std::string &path) {
+    auto objData = loadObjData(path);
+    auto mesh = buildMeshFromObj<Vertex>(objData, [](const ObjVertexRef &vertex) {
+      return Vertex{
+          .pos = vertex.position(),
+          .color = {1.0f, 1.0f, 1.0f},
+          .texCoord = vertex.texCoord(),
+      };
+    });
+    setGeometry(std::vector<Vertex>(mesh.vertexData().begin(), mesh.vertexData().end()),
+                std::vector<uint32_t>(mesh.getIndices().begin(),
+                                      mesh.getIndices().end()));
+  }
+};
+
+using VertexMesh = TypedMesh<Vertex>;

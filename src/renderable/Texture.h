@@ -15,6 +15,7 @@ import vulkan_hpp;
 #include <stb_image.h>
 
 #include "./RenderUtils.h"
+#include "../renderer/SampledImageResource.h"
 
 class Texture {
 public:
@@ -73,6 +74,16 @@ public:
   vk::raii::ImageView &imageView() { return textureImageView; }
   const vk::raii::ImageView &imageView() const { return textureImageView; }
   uint32_t mipLevelCount() const { return mipLevels; }
+  SampledImageResource
+  sampledResource(const vk::raii::Sampler &sampler,
+                  vk::ImageLayout imageLayout =
+                      vk::ImageLayout::eShaderReadOnlyOptimal) const {
+    return SampledImageResource{
+        .imageView = textureImageView,
+        .sampler = sampler,
+        .imageLayout = imageLayout,
+    };
+  }
 
 private:
   void generateMipmaps(vk::raii::Image &image, vk::Format imageFormat,

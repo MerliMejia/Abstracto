@@ -76,27 +76,45 @@ target_compile_definitions(
 )
 
 set(RENDERCUBED_SHADER_DIR ${CMAKE_SOURCE_DIR}/assets/shaders)
-set(RENDERCUBED_SLANG_SOURCE ${RENDERCUBED_SHADER_DIR}/test_pass.slang)
-set(RENDERCUBED_SLANG_OUTPUT ${RENDERCUBED_SHADER_DIR}/test_pass.spv)
+set(RENDERCUBED_SLANG_SOURCES
+  ${RENDERCUBED_SHADER_DIR}/test_pass.slang
+  ${RENDERCUBED_SHADER_DIR}/solid_transform_pass.slang
+  ${RENDERCUBED_SHADER_DIR}/texture_pass.slang
+  ${RENDERCUBED_SHADER_DIR}/debug_present_pass.slang
+)
 
 find_program(RENDERCUBED_SLANGC_EXECUTABLE NAMES slangc)
-if(RENDERCUBED_SLANGC_EXECUTABLE AND EXISTS ${RENDERCUBED_SLANG_SOURCE})
-  add_custom_command(
-    OUTPUT ${RENDERCUBED_SLANG_OUTPUT}
-    COMMAND ${RENDERCUBED_SLANGC_EXECUTABLE}
-            ${RENDERCUBED_SLANG_SOURCE}
-            -target spirv
-            -profile glsl_450
-            -emit-spirv-directly
-            -o ${RENDERCUBED_SLANG_OUTPUT}
-    DEPENDS ${RENDERCUBED_SLANG_SOURCE}
-    COMMENT "Compiling Slang shader to SPIR-V: ${RENDERCUBED_SLANG_OUTPUT}"
-    VERBATIM
-  )
-  add_custom_target(rendercubed_shaders DEPENDS ${RENDERCUBED_SLANG_OUTPUT})
+set(RENDERCUBED_SLANG_OUTPUTS)
+foreach(RENDERCUBED_SLANG_SOURCE IN LISTS RENDERCUBED_SLANG_SOURCES)
+  if(EXISTS ${RENDERCUBED_SLANG_SOURCE})
+    get_filename_component(RENDERCUBED_SLANG_NAME
+                           ${RENDERCUBED_SLANG_SOURCE} NAME_WE)
+    set(RENDERCUBED_SLANG_OUTPUT
+        ${RENDERCUBED_SHADER_DIR}/${RENDERCUBED_SLANG_NAME}.spv)
+    list(APPEND RENDERCUBED_SLANG_OUTPUTS ${RENDERCUBED_SLANG_OUTPUT})
+
+    if(RENDERCUBED_SLANGC_EXECUTABLE)
+      add_custom_command(
+        OUTPUT ${RENDERCUBED_SLANG_OUTPUT}
+        COMMAND ${RENDERCUBED_SLANGC_EXECUTABLE}
+                ${RENDERCUBED_SLANG_SOURCE}
+                -target spirv
+                -profile glsl_450
+                -emit-spirv-directly
+                -o ${RENDERCUBED_SLANG_OUTPUT}
+        DEPENDS ${RENDERCUBED_SLANG_SOURCE}
+        COMMENT "Compiling Slang shader to SPIR-V: ${RENDERCUBED_SLANG_OUTPUT}"
+        VERBATIM
+      )
+    endif()
+  endif()
+endforeach()
+
+if(RENDERCUBED_SLANGC_EXECUTABLE AND RENDERCUBED_SLANG_OUTPUTS)
+  add_custom_target(rendercubed_shaders DEPENDS ${RENDERCUBED_SLANG_OUTPUTS})
   add_dependencies(RenderCubed rendercubed_shaders)
 else()
-  message(WARNING "slangc not found (or source missing). Install slangc to auto-generate assets/shaders/test_pass.spv.")
+  message(WARNING "slangc not found (or no Slang sources were found). Install slangc to auto-generate assets/shaders/*.spv.")
 endif()
 
 target_link_libraries(

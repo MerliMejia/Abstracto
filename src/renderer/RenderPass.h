@@ -12,9 +12,12 @@
 import vulkan_hpp;
 #endif
 
+class RenderPass;
+
 struct RenderItem {
   Mesh *mesh = nullptr;
   DescriptorBindings *descriptorBindings = nullptr;
+  const RenderPass *targetPass = nullptr;
 };
 
 struct RenderPassContext {

@@ -1,9 +1,10 @@
 #pragma once
 
+#include "../renderable/RenderUtils.h"
+#include "SampledImageResource.h"
 #include "PipelineSpec.h"
 #include "RenderPass.h"
 #include "ShaderProgram.h"
-#include "../renderable/RenderUtils.h"
 #include <array>
 #include <optional>
 
@@ -20,12 +21,26 @@ struct DescriptorBindingSpec {
   vk::ShaderStageFlags stageFlags = {};
 };
 
+inline DescriptorBindingSpec sampledImageBindingSpec(
+    uint32_t binding,
+    vk::ShaderStageFlags stageFlags = vk::ShaderStageFlagBits::eFragment) {
+  return DescriptorBindingSpec{
+      .binding = binding,
+      .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+      .descriptorCount = 1,
+      .stageFlags = stageFlags,
+  };
+}
+
 struct MeshPassAttachmentConfig {
   bool useColorAttachment = true;
   bool useDepthAttachment = true;
   bool useMsaaColorAttachment = true;
   bool resolveToSwapchain = true;
-  std::array<float, 4> clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
+  bool useSwapchainColorAttachment = true;
+  bool sampleColorAttachment = false;
+  vk::Format offscreenColorFormat = vk::Format::eUndefined;
+  std::array<float, 4> clearColor = {0.0f, 0.0f, 0.0f, 0.0f};
   float clearDepth = 1.0f;
   uint32_t clearStencil = 0;
   vk::AttachmentLoadOp colorLoadOp = vk::AttachmentLoadOp::eClear;
@@ -49,6 +64,7 @@ public:
 
   void initialize(DeviceContext &deviceContext,
                   SwapchainContext &swapchainContext) override {
+    validateAttachmentConfig();
     createDescriptorSetLayout(deviceContext);
     createPipelineLayout(deviceContext);
     createGraphicsPipeline(deviceContext, swapchainContext);
@@ -58,6 +74,7 @@ public:
 
   void recreate(DeviceContext &deviceContext,
                 SwapchainContext &swapchainContext) override {
+    validateAttachmentConfig();
     createGraphicsPipeline(deviceContext, swapchainContext);
     createAttachmentResources(deviceContext, swapchainContext);
     recreatePassResources(deviceContext, swapchainContext);
@@ -82,10 +99,11 @@ public:
     context.commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                        *graphicsPipeline);
     context.commandBuffer.setViewport(
-        0, vk::Viewport(0.0f, 0.0f,
-                        static_cast<float>(context.swapchainContext.extent2D().width),
-                        static_cast<float>(context.swapchainContext.extent2D().height),
-                        0.0f, 1.0f));
+        0, vk::Viewport(
+               0.0f, 0.0f,
+               static_cast<float>(context.swapchainContext.extent2D().width),
+               static_cast<float>(context.swapchainContext.extent2D().height),
+               0.0f, 1.0f));
     context.commandBuffer.setScissor(
         0, vk::Rect2D(vk::Offset2D(0, 0), context.swapchainContext.extent2D()));
 
@@ -108,6 +126,51 @@ public:
     return hasDescriptorSetLayout() ? &descriptorSetLayoutHandle : nullptr;
   }
 
+  bool hasOffscreenColorOutput() const {
+    return usesOffscreenColorAttachment();
+  }
+
+  bool hasSampledColorOutput() const {
+    return usesOffscreenColorAttachment() && attachments.sampleColorAttachment;
+  }
+
+  const vk::raii::ImageView &offscreenColorImageView() const {
+    if (!hasOffscreenColorOutput()) {
+      throw std::runtime_error(
+          "Render pass does not expose an offscreen color attachment");
+    }
+    return colorImageView;
+  }
+
+  vk::Format offscreenColorImageFormat() const {
+    if (!hasOffscreenColorOutput()) {
+      throw std::runtime_error(
+          "Render pass does not expose an offscreen color attachment");
+    }
+    return colorImageFormat;
+  }
+
+  vk::ImageLayout offscreenColorImageLayout() const {
+    if (!hasOffscreenColorOutput()) {
+      throw std::runtime_error(
+          "Render pass does not expose an offscreen color attachment");
+    }
+    return colorImageLayout;
+  }
+
+  SampledImageResource
+  sampledColorOutput(const vk::raii::Sampler &sampler) const {
+    if (!hasSampledColorOutput()) {
+      throw std::runtime_error(
+          "Render pass does not expose a sampled offscreen color attachment");
+    }
+    return SampledImageResource{
+        .imageView = colorImageView,
+        .sampler = sampler,
+        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+    };
+  }
+
 protected:
   virtual std::vector<DescriptorBindingSpec> descriptorBindings() const {
     return {};
@@ -121,10 +184,9 @@ protected:
     auto bindingDescription = Vertex::getBindingDescription();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
-    return VertexInputLayoutSpec{
-        .bindings = {bindingDescription},
-        .attributes = {attributeDescriptions.begin(),
-                       attributeDescriptions.end()}};
+    return VertexInputLayoutSpec{.bindings = {bindingDescription},
+                                 .attributes = {attributeDescriptions.begin(),
+                                                attributeDescriptions.end()}};
   }
 
   virtual void initializePassResources(DeviceContext &deviceContext,
@@ -136,13 +198,12 @@ protected:
   virtual void bindPassResources(const RenderPassContext &context) {}
 
   virtual bool shouldDrawRenderItem(const RenderItem &renderItem) const {
-    return true;
+    return renderItem.targetPass == nullptr || renderItem.targetPass == this;
   }
 
   virtual void bindRenderItemResources(const RenderPassContext &context,
                                        const RenderItem &renderItem) {
-    if (hasDescriptorSetLayout() &&
-        renderItem.descriptorBindings != nullptr) {
+    if (hasDescriptorSetLayout() && renderItem.descriptorBindings != nullptr) {
       context.commandBuffer.bindDescriptorSets(
           vk::PipelineBindPoint::eGraphics, pipelineLayout, 0,
           *renderItem.descriptorBindings->descriptorSet(context.frameIndex),
@@ -152,16 +213,18 @@ protected:
 
   virtual void drawRenderItem(const RenderPassContext &context,
                               const RenderItem &renderItem) {
-    context.commandBuffer.bindVertexBuffers(0, *renderItem.mesh->getVertexBuffer(),
-                                            {0});
+    context.commandBuffer.bindVertexBuffers(
+        0, *renderItem.mesh->getVertexBuffer(), {0});
     context.commandBuffer.bindIndexBuffer(*renderItem.mesh->getIndexBuffer(), 0,
                                           vk::IndexType::eUint32);
-    context.commandBuffer.drawIndexed(renderItem.mesh->getIndices().size(), 1, 0, 0,
-                                      0);
+    context.commandBuffer.drawIndexed(renderItem.mesh->getIndices().size(), 1,
+                                      0, 0, 0);
   }
 
   const PipelineSpec &pipelineSpec() const { return spec; }
-  const MeshPassAttachmentConfig &attachmentConfig() const { return attachments; }
+  const MeshPassAttachmentConfig &attachmentConfig() const {
+    return attachments;
+  }
 
   vk::raii::PipelineLayout &pipelineLayoutHandle() { return pipelineLayout; }
   const vk::raii::PipelineLayout &pipelineLayoutHandle() const {
@@ -188,10 +251,14 @@ private:
   vk::raii::Image colorImage = nullptr;
   vk::raii::DeviceMemory colorImageMemory = nullptr;
   vk::raii::ImageView colorImageView = nullptr;
+  vk::Format colorImageFormat = vk::Format::eUndefined;
 
   vk::raii::Image depthImage = nullptr;
   vk::raii::DeviceMemory depthImageMemory = nullptr;
   vk::raii::ImageView depthImageView = nullptr;
+  vk::ImageLayout colorImageLayout = vk::ImageLayout::eUndefined;
+  vk::ImageLayout depthImageLayout = vk::ImageLayout::eUndefined;
+  std::vector<vk::ImageLayout> swapchainImageLayouts;
 
   void createDescriptorSetLayout(DeviceContext &deviceContext) {
     auto bindingSpecs = descriptorBindings();
@@ -204,8 +271,8 @@ private:
     bindings.reserve(bindingSpecs.size());
     for (const auto &bindingSpec : bindingSpecs) {
       bindings.emplace_back(bindingSpec.binding, bindingSpec.descriptorType,
-                            bindingSpec.descriptorCount,
-                            bindingSpec.stageFlags, nullptr);
+                            bindingSpec.descriptorCount, bindingSpec.stageFlags,
+                            nullptr);
     }
 
     vk::DescriptorSetLayoutCreateInfo layoutInfo{
@@ -245,8 +312,7 @@ private:
             static_cast<uint32_t>(vertexLayout.attributes.size()),
         .pVertexAttributeDescriptions = vertexLayout.attributes.data()};
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
-        .topology = spec.topology,
-        .primitiveRestartEnable = vk::False};
+        .topology = spec.topology, .primitiveRestartEnable = vk::False};
     vk::PipelineViewportStateCreateInfo viewportState{.viewportCount = 1,
                                                       .scissorCount = 1};
     vk::PipelineRasterizationStateCreateInfo rasterizer{
@@ -261,8 +327,10 @@ private:
         .rasterizationSamples = rasterizationSampleCount(deviceContext),
         .sampleShadingEnable = vk::False};
     vk::PipelineDepthStencilStateCreateInfo depthStencil{
-        .depthTestEnable = spec.enableDepthTest && attachments.useDepthAttachment,
-        .depthWriteEnable = spec.enableDepthWrite && attachments.useDepthAttachment,
+        .depthTestEnable =
+            spec.enableDepthTest && attachments.useDepthAttachment,
+        .depthWriteEnable =
+            spec.enableDepthWrite && attachments.useDepthAttachment,
         .depthCompareOp = vk::CompareOp::eLess,
         .depthBoundsTestEnable = vk::False,
         .stencilTestEnable = vk::False};
@@ -289,7 +357,7 @@ private:
         .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data()};
 
-    vk::Format colorFormat = swapchainContext.surfaceFormatInfo().format;
+    vk::Format colorFormat = colorAttachmentFormat(swapchainContext);
     vk::Format depthFormat = attachments.useDepthAttachment
                                  ? deviceContext.findDepthFormat()
                                  : vk::Format::eUndefined;
@@ -316,20 +384,20 @@ private:
              .pColorAttachmentFormats = colorAttachmentFormats,
              .depthAttachmentFormat = depthFormat}};
 
-    graphicsPipeline =
-        vk::raii::Pipeline(deviceContext.deviceHandle(), nullptr,
-                           pipelineCreateInfoChain.get<
-                               vk::GraphicsPipelineCreateInfo>());
+    graphicsPipeline = vk::raii::Pipeline(
+        deviceContext.deviceHandle(), nullptr,
+        pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
   }
 
   void createAttachmentResources(DeviceContext &deviceContext,
                                  SwapchainContext &swapchainContext) {
-    if (attachments.useColorAttachment && attachments.useMsaaColorAttachment) {
+    if (usesOwnedColorAttachment()) {
       createColorResources(deviceContext, swapchainContext);
     } else {
       colorImage = nullptr;
       colorImageMemory = nullptr;
       colorImageView = nullptr;
+      colorImageFormat = vk::Format::eUndefined;
     }
 
     if (attachments.useDepthAttachment) {
@@ -339,33 +407,46 @@ private:
       depthImageMemory = nullptr;
       depthImageView = nullptr;
     }
+
+    colorImageLayout = vk::ImageLayout::eUndefined;
+    depthImageLayout = vk::ImageLayout::eUndefined;
+    swapchainImageLayouts.assign(swapchainContext.imageCount(),
+                                 vk::ImageLayout::eUndefined);
   }
 
   void createColorResources(DeviceContext &deviceContext,
                             SwapchainContext &swapchainContext) {
-    vk::Format colorFormat = swapchainContext.surfaceFormatInfo().format;
+    vk::Format colorFormat = colorAttachmentFormat(swapchainContext);
+    vk::ImageUsageFlags imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+    if (attachments.useMsaaColorAttachment) {
+      imageUsage |= vk::ImageUsageFlagBits::eTransientAttachment;
+    }
+    if (attachments.sampleColorAttachment) {
+      imageUsage |= vk::ImageUsageFlagBits::eSampled;
+    }
 
-    RenderUtils::createImage(
-        deviceContext, swapchainContext.extent2D().width,
-        swapchainContext.extent2D().height, 1, rasterizationSampleCount(deviceContext),
-        colorFormat, vk::ImageTiling::eOptimal,
-        vk::ImageUsageFlagBits::eTransientAttachment |
-            vk::ImageUsageFlagBits::eColorAttachment,
-        vk::MemoryPropertyFlagBits::eDeviceLocal, colorImage, colorImageMemory);
+    RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
+                             swapchainContext.extent2D().height, 1,
+                             rasterizationSampleCount(deviceContext),
+                             colorFormat, vk::ImageTiling::eOptimal, imageUsage,
+                             vk::MemoryPropertyFlagBits::eDeviceLocal,
+                             colorImage, colorImageMemory);
     colorImageView = createImageView(deviceContext, colorImage, colorFormat,
                                      vk::ImageAspectFlagBits::eColor, 1);
+    colorImageFormat = colorFormat;
   }
 
   void createDepthResources(DeviceContext &deviceContext,
                             SwapchainContext &swapchainContext) {
     vk::Format depthFormat = deviceContext.findDepthFormat();
 
-    RenderUtils::createImage(
-        deviceContext, swapchainContext.extent2D().width,
-        swapchainContext.extent2D().height, 1, rasterizationSampleCount(deviceContext),
-        depthFormat, vk::ImageTiling::eOptimal,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment,
-        vk::MemoryPropertyFlagBits::eDeviceLocal, depthImage, depthImageMemory);
+    RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
+                             swapchainContext.extent2D().height, 1,
+                             rasterizationSampleCount(deviceContext),
+                             depthFormat, vk::ImageTiling::eOptimal,
+                             vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                             vk::MemoryPropertyFlagBits::eDeviceLocal,
+                             depthImage, depthImageMemory);
     depthImageView = createImageView(deviceContext, depthImage, depthFormat,
                                      vk::ImageAspectFlagBits::eDepth, 1);
   }
@@ -385,56 +466,68 @@ private:
 
   void transitionToRenderingLayouts(const RenderPassContext &context) {
     if (writesToSwapchain()) {
+      auto &swapchainImageLayout = swapchainImageLayouts.at(context.imageIndex);
       transitionImageLayout(
           context.commandBuffer,
           context.swapchainContext.swapchainImages()[context.imageIndex],
-          vk::ImageLayout::eUndefined,
-          vk::ImageLayout::eColorAttachmentOptimal, {},
+          swapchainImageLayout, vk::ImageLayout::eColorAttachmentOptimal, {},
           vk::AccessFlagBits2::eColorAttachmentWrite,
-          vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+          layoutStageMask(swapchainImageLayout),
           vk::PipelineStageFlagBits2::eColorAttachmentOutput,
           vk::ImageAspectFlagBits::eColor);
+      swapchainImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
     }
 
-    if (attachments.useColorAttachment && attachments.useMsaaColorAttachment) {
-      transitionImageLayout(
-          context.commandBuffer, *colorImage, vk::ImageLayout::eUndefined,
-          vk::ImageLayout::eColorAttachmentOptimal,
-          vk::AccessFlagBits2::eColorAttachmentWrite,
-          vk::AccessFlagBits2::eColorAttachmentWrite,
-          vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-          vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-          vk::ImageAspectFlagBits::eColor);
+    if (usesOwnedColorAttachment()) {
+      transitionImageLayout(context.commandBuffer, *colorImage,
+                            colorImageLayout,
+                            vk::ImageLayout::eColorAttachmentOptimal,
+                            layoutAccessMask(colorImageLayout),
+                            vk::AccessFlagBits2::eColorAttachmentWrite,
+                            layoutStageMask(colorImageLayout),
+                            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                            vk::ImageAspectFlagBits::eColor);
+      colorImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
     }
 
     if (attachments.useDepthAttachment) {
-      transitionImageLayout(
-          context.commandBuffer, *depthImage, vk::ImageLayout::eUndefined,
-          vk::ImageLayout::eDepthAttachmentOptimal,
-          vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-          vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-          vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-              vk::PipelineStageFlagBits2::eLateFragmentTests,
-          vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-              vk::PipelineStageFlagBits2::eLateFragmentTests,
-          vk::ImageAspectFlagBits::eDepth);
+      transitionImageLayout(context.commandBuffer, *depthImage,
+                            depthImageLayout,
+                            vk::ImageLayout::eDepthAttachmentOptimal,
+                            layoutAccessMask(depthImageLayout),
+                            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+                            layoutStageMask(depthImageLayout),
+                            vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                                vk::PipelineStageFlagBits2::eLateFragmentTests,
+                            vk::ImageAspectFlagBits::eDepth);
+      depthImageLayout = vk::ImageLayout::eDepthAttachmentOptimal;
     }
   }
 
   void transitionToFinalLayouts(const RenderPassContext &context) {
-    if (!writesToSwapchain()) {
-      return;
+    if (hasSampledColorOutput()) {
+      transitionImageLayout(
+          context.commandBuffer, *colorImage, colorImageLayout,
+          vk::ImageLayout::eShaderReadOnlyOptimal,
+          layoutAccessMask(colorImageLayout), vk::AccessFlagBits2::eShaderRead,
+          layoutStageMask(colorImageLayout),
+          vk::PipelineStageFlagBits2::eFragmentShader,
+          vk::ImageAspectFlagBits::eColor);
+      colorImageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
     }
 
-    transitionImageLayout(
-        context.commandBuffer,
-        context.swapchainContext.swapchainImages()[context.imageIndex],
-        vk::ImageLayout::eColorAttachmentOptimal,
-        vk::ImageLayout::ePresentSrcKHR,
-        vk::AccessFlagBits2::eColorAttachmentWrite, {},
-        vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-        vk::PipelineStageFlagBits2::eBottomOfPipe,
-        vk::ImageAspectFlagBits::eColor);
+    if (writesToSwapchain()) {
+      auto &swapchainImageLayout = swapchainImageLayouts.at(context.imageIndex);
+      transitionImageLayout(
+          context.commandBuffer,
+          context.swapchainContext.swapchainImages()[context.imageIndex],
+          swapchainImageLayout, vk::ImageLayout::ePresentSrcKHR,
+          layoutAccessMask(swapchainImageLayout), {},
+          layoutStageMask(swapchainImageLayout),
+          vk::PipelineStageFlagBits2::eBottomOfPipe,
+          vk::ImageAspectFlagBits::eColor);
+      swapchainImageLayout = vk::ImageLayout::ePresentSrcKHR;
+    }
   }
 
   std::optional<vk::RenderingAttachmentInfo>
@@ -443,8 +536,7 @@ private:
       return std::nullopt;
     }
 
-    vk::ClearValue clearColor = {
-        .color = {.float32 = attachments.clearColor}};
+    vk::ClearValue clearColor = {.color = {.float32 = attachments.clearColor}};
 
     if (attachments.useMsaaColorAttachment) {
       return vk::RenderingAttachmentInfo{
@@ -455,19 +547,29 @@ private:
                              : vk::ResolveModeFlagBits::eNone,
           .resolveImageView =
               attachments.resolveToSwapchain
-                  ? context.swapchainContext.swapchainImageViews()[context.imageIndex]
+                  ? context.swapchainContext
+                        .swapchainImageViews()[context.imageIndex]
                   : vk::ImageView(),
-          .resolveImageLayout =
-              attachments.resolveToSwapchain
-                  ? vk::ImageLayout::eColorAttachmentOptimal
-                  : vk::ImageLayout::eUndefined,
+          .resolveImageLayout = attachments.resolveToSwapchain
+                                    ? vk::ImageLayout::eColorAttachmentOptimal
+                                    : vk::ImageLayout::eUndefined,
+          .loadOp = attachments.colorLoadOp,
+          .storeOp = attachments.colorStoreOp,
+          .clearValue = clearColor};
+    }
+
+    if (usesOffscreenColorAttachment()) {
+      return vk::RenderingAttachmentInfo{
+          .imageView = colorImageView,
+          .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
           .loadOp = attachments.colorLoadOp,
           .storeOp = attachments.colorStoreOp,
           .clearValue = clearColor};
     }
 
     return vk::RenderingAttachmentInfo{
-        .imageView = context.swapchainContext.swapchainImageViews()[context.imageIndex],
+        .imageView =
+            context.swapchainContext.swapchainImageViews()[context.imageIndex],
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
         .loadOp = attachments.colorLoadOp,
         .storeOp = attachments.colorStoreOp,
@@ -497,13 +599,83 @@ private:
   }
 
   bool writesToSwapchain() const {
-    return (attachments.useColorAttachment && !attachments.useMsaaColorAttachment) ||
-           attachments.resolveToSwapchain;
+    return usesSwapchainColorAttachment() || attachments.resolveToSwapchain;
+  }
+
+  bool usesSwapchainColorAttachment() const {
+    return attachments.useColorAttachment &&
+           attachments.useSwapchainColorAttachment &&
+           !attachments.useMsaaColorAttachment;
+  }
+
+  bool usesOffscreenColorAttachment() const {
+    return attachments.useColorAttachment &&
+           !attachments.useSwapchainColorAttachment &&
+           !attachments.useMsaaColorAttachment;
+  }
+
+  bool usesOwnedColorAttachment() const {
+    return attachments.useColorAttachment &&
+           (attachments.useMsaaColorAttachment ||
+            usesOffscreenColorAttachment());
   }
 
   bool hasDescriptorSetLayout() const {
     return static_cast<vk::DescriptorSetLayout>(descriptorSetLayoutHandle) !=
            VK_NULL_HANDLE;
+  }
+
+  vk::Format
+  colorAttachmentFormat(const SwapchainContext &swapchainContext) const {
+    if (usesOffscreenColorAttachment() &&
+        attachments.offscreenColorFormat != vk::Format::eUndefined) {
+      return attachments.offscreenColorFormat;
+    }
+    return swapchainContext.surfaceFormatInfo().format;
+  }
+
+  vk::AccessFlags2 layoutAccessMask(vk::ImageLayout layout) const {
+    switch (layout) {
+    case vk::ImageLayout::eColorAttachmentOptimal:
+      return vk::AccessFlagBits2::eColorAttachmentWrite;
+    case vk::ImageLayout::eDepthAttachmentOptimal:
+      return vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+    case vk::ImageLayout::eShaderReadOnlyOptimal:
+      return vk::AccessFlagBits2::eShaderRead;
+    default:
+      return {};
+    }
+  }
+
+  vk::PipelineStageFlags2 layoutStageMask(vk::ImageLayout layout) const {
+    switch (layout) {
+    case vk::ImageLayout::eColorAttachmentOptimal:
+      return vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    case vk::ImageLayout::eDepthAttachmentOptimal:
+      return vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+             vk::PipelineStageFlagBits2::eLateFragmentTests;
+    case vk::ImageLayout::eShaderReadOnlyOptimal:
+      return vk::PipelineStageFlagBits2::eFragmentShader;
+    case vk::ImageLayout::ePresentSrcKHR:
+      return vk::PipelineStageFlagBits2::eBottomOfPipe;
+    default:
+      return vk::PipelineStageFlagBits2::eTopOfPipe;
+    }
+  }
+
+  void validateAttachmentConfig() const {
+    if (attachments.sampleColorAttachment && !usesOffscreenColorAttachment()) {
+      throw std::runtime_error("sampleColorAttachment requires a "
+                               "single-sampled offscreen color attachment");
+    }
+    if (attachments.useMsaaColorAttachment && !attachments.useColorAttachment) {
+      throw std::runtime_error(
+          "useMsaaColorAttachment requires useColorAttachment to be enabled");
+    }
+    if (attachments.resolveToSwapchain && !attachments.useColorAttachment) {
+      throw std::runtime_error(
+          "resolveToSwapchain requires useColorAttachment to be enabled");
+    }
   }
 
   void transitionImageLayout(vk::raii::CommandBuffer &commandBuffer,
@@ -514,6 +686,10 @@ private:
                              vk::PipelineStageFlags2 srcStageMask,
                              vk::PipelineStageFlags2 dstStageMask,
                              vk::ImageAspectFlags imageAspectFlags) {
+    if (oldLayout == newLayout) {
+      return;
+    }
+
     vk::ImageMemoryBarrier2 barrier = {
         .srcStageMask = srcStageMask,
         .srcAccessMask = srcAccessMask,
