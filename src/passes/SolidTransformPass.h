@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../renderer/PipelineSpec.h"
-#include "../renderer/UniformMeshRenderPass.h"
+#include "../renderer/UniformSceneRenderPass.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -19,17 +19,17 @@ struct PositionUvVertex {
   glm::vec2 uv;
 };
 
-class SolidTransformPass : public UniformMeshRenderPass<SolidTransformData> {
+class SolidTransformPass : public UniformSceneRenderPass<SolidTransformData> {
 public:
   SolidTransformPass(PipelineSpec spec, uint32_t framesInFlight)
-      : UniformMeshRenderPass<SolidTransformData>(
+      : UniformSceneRenderPass<SolidTransformData>(
             std::move(spec), framesInFlight,
-            MeshPassAttachmentConfig{.useColorAttachment = true,
-                                     .useDepthAttachment = true,
-                                     .useMsaaColorAttachment = false,
-                                     .resolveToSwapchain = false,
-                                     .useSwapchainColorAttachment = false,
-                                     .sampleColorAttachment = true}) {}
+            RasterPassAttachmentConfig{.useColorAttachment = true,
+                                       .useDepthAttachment = true,
+                                       .useMsaaColorAttachment = false,
+                                       .resolveToSwapchain = false,
+                                       .useSwapchainColorAttachment = false,
+                                       .sampleColorAttachment = true}) {}
 
 private:
   SolidTransformData buildUniformData(uint32_t frameIndex) const override {

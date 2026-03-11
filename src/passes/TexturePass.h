@@ -1,32 +1,29 @@
 #pragma once
 
-#include "../renderer/MeshRenderPass.h"
-#include "../renderer/PassImageSet.h"
+#include "../renderer/FullscreenRenderPass.h"
 #include "SolidTransformPass.h"
 #include "vulkan/vulkan.hpp"
 #include <cstdint>
 
-class TexturePass : public MeshRenderPass {
+class TexturePass : public FullscreenRenderPass {
 public:
   TexturePass(PipelineSpec spec, uint32_t framesInFlight,
               const SolidTransformPass &solidPass, const Texture &albedoTexture)
-      : MeshRenderPass(
+      : FullscreenRenderPass(
             std::move(spec),
-            MeshPassAttachmentConfig{.useColorAttachment = true,
-                                     .useDepthAttachment = false,
-                                     .useMsaaColorAttachment = false,
-                                     .resolveToSwapchain = false,
-                                     .useSwapchainColorAttachment = true,
-                                     .sampleColorAttachment = false}),
-        framesInFlightCount(framesInFlight), solidTransformRef(solidPass),
+            framesInFlight,
+            RasterPassAttachmentConfig{.useColorAttachment = true,
+                                       .useDepthAttachment = false,
+                                       .useMsaaColorAttachment = false,
+                                       .resolveToSwapchain = false,
+                                       .useSwapchainColorAttachment = true,
+                                       .sampleColorAttachment = false}),
+        solidTransformRef(solidPass),
         albedoTexture(albedoTexture) {}
 
 protected:
-  std::vector<DescriptorBindingSpec> descriptorBindings() const override {
-    return {
-        sampledImageBindingSpec(0),
-        sampledImageBindingSpec(1),
-    };
+  std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
+    return {{.binding = 0}, {.binding = 1}};
   }
 
   VertexInputLayoutSpec vertexInputLayout() const override {
@@ -45,40 +42,15 @@ protected:
     };
   }
 
-  void initializePassResources(DeviceContext &deviceContext,
-                               SwapchainContext &swapchainContext) override {
-    sampler.create(deviceContext);
-
-    images.initialize(
-        deviceContext, passDescriptorSetLayout(), framesInFlightCount,
-        {{
-            {0, solidTransformRef.sampledColorOutput(sampler.handle())},
-            {1, albedoTexture.sampledResource(sampler.handle())},
-        }});
+  std::vector<PassImageBinding>
+  resolveImageBindings(const vk::raii::Sampler &sampler) const override {
+    return {
+        {0, solidTransformRef.sampledColorOutput(sampler)},
+        {1, albedoTexture.sampledResource(sampler)},
+    };
   }
-
-  void recreatePassResources(DeviceContext &deviceContext,
-                             SwapchainContext &swapchainContext) override {
-    images.update(
-        deviceContext,
-        {
-            {0, solidTransformRef.sampledColorOutput(sampler.handle())},
-            {1, albedoTexture.sampledResource(sampler.handle())},
-        });
-  }
-
-  void bindPassResources(const RenderPassContext &context) override {
-    images.bind(context.commandBuffer, pipelineLayoutHandle(),
-                context.frameIndex);
-  }
-
-  void bindRenderItemResources(const RenderPassContext &context,
-                               const RenderItem &renderItem) override {}
 
 private:
-  uint32_t framesInFlightCount = 0;
   const SolidTransformPass &solidTransformRef;
   const Texture &albedoTexture;
-  Sampler sampler;
-  PassImageSet images;
 };
