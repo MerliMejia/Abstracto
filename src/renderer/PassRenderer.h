@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
-class ForwardRenderer {
+class PassRenderer {
 public:
   void addPass(std::unique_ptr<RenderPass> renderPass) {
     passes.push_back(std::move(renderPass));
@@ -14,8 +14,7 @@ public:
   void initialize(DeviceContext &deviceContext,
                   SwapchainContext &swapchainContext) {
     if (passes.empty()) {
-      throw std::runtime_error(
-          "ForwardRenderer requires at least one render pass");
+      throw std::runtime_error("PassRenderer requires at least one render pass");
     }
 
     for (auto &renderPass : passes) {

@@ -78,6 +78,9 @@ target_compile_definitions(
 set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/assets/shaders)
 set(ABSTRACTO_SLANG_SOURCES
   ${ABSTRACTO_SHADER_DIR}/test_pass.slang
+  ${ABSTRACTO_SHADER_DIR}/debug_gbuffer_pass.slang
+  ${ABSTRACTO_SHADER_DIR}/geometry_pass.slang
+  ${ABSTRACTO_SHADER_DIR}/light_pass.slang
   ${ABSTRACTO_SHADER_DIR}/solid_transform_pass.slang
   ${ABSTRACTO_SHADER_DIR}/texture_pass.slang
   ${ABSTRACTO_SHADER_DIR}/debug_present_pass.slang

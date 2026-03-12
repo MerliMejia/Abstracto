@@ -1,6 +1,8 @@
 #pragma once
 #include "RenderUtils.h"
+#include "vulkan/vulkan.hpp"
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 #include <type_traits>
@@ -69,7 +71,8 @@ public:
   void createVertexBuffer(CommandContext &commandContext,
                           DeviceContext &deviceContext) {
     if (vertexBytes.empty()) {
-      throw std::runtime_error("cannot create a vertex buffer with no vertices");
+      throw std::runtime_error(
+          "cannot create a vertex buffer with no vertices");
     }
 
     vk::DeviceSize bufferSize = vertexBytes.size();
@@ -199,8 +202,7 @@ struct ObjData {
 class ObjVertexRef {
 public:
   ObjVertexRef(const tinyobj::attrib_t &attribData, tinyobj::index_t objIndex)
-      : attrib(&attribData),
-        index(objIndex) {}
+      : attrib(&attribData), index(objIndex) {}
 
   glm::vec3 position() const {
     if (index.vertex_index < 0) {
@@ -265,12 +267,18 @@ TypedMesh<TVertex> buildMeshFromObj(const ObjData &objData,
                                     TVertexFactory &&vertexFactory) {
   std::vector<TVertex> meshVertices;
   std::vector<uint32_t> meshIndices;
+  std::unordered_map<TVertex, uint32_t> uniqueVertices;
 
   for (const auto &shape : objData.shapes) {
     for (const auto &index : shape.mesh.indices) {
       ObjVertexRef objVertex(objData.attrib, index);
-      meshVertices.push_back(vertexFactory(objVertex));
-      meshIndices.push_back(static_cast<uint32_t>(meshVertices.size() - 1));
+      TVertex vertex = vertexFactory(objVertex);
+      auto [it, inserted] = uniqueVertices.try_emplace(
+          vertex, static_cast<uint32_t>(meshVertices.size()));
+      if (inserted) {
+        meshVertices.push_back(vertex);
+      }
+      meshIndices.push_back(it->second);
     }
   }
 
@@ -283,17 +291,113 @@ class ObjMesh : public TypedMesh<Vertex> {
 public:
   void loadModel(const std::string &path) {
     auto objData = loadObjData(path);
-    auto mesh = buildMeshFromObj<Vertex>(objData, [](const ObjVertexRef &vertex) {
-      return Vertex{
-          .pos = vertex.position(),
-          .color = {1.0f, 1.0f, 1.0f},
-          .texCoord = vertex.texCoord(),
-      };
-    });
-    setGeometry(std::vector<Vertex>(mesh.vertexData().begin(), mesh.vertexData().end()),
+    auto mesh =
+        buildMeshFromObj<Vertex>(objData, [](const ObjVertexRef &vertex) {
+          return Vertex{
+              .pos = vertex.position(),
+              .color = {1.0f, 1.0f, 1.0f},
+              .texCoord = vertex.texCoord(),
+          };
+        });
+    setGeometry(
+        std::vector<Vertex>(mesh.vertexData().begin(), mesh.vertexData().end()),
+        std::vector<uint32_t>(mesh.getIndices().begin(),
+                              mesh.getIndices().end()));
+  }
+};
+
+using VertexMesh = TypedMesh<Vertex>;
+
+struct GeometryVertex {
+  glm::vec3 pos;
+  glm::vec3 normal;
+  glm::vec2 texCoord;
+
+  static vk::VertexInputBindingDescription getBindingDescription() {
+    return {0, sizeof(GeometryVertex), vk::VertexInputRate::eVertex};
+  }
+
+  static std::array<vk::VertexInputAttributeDescription, 3>
+  getAttributeDescriptions() {
+    return {
+        vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,
+                                            offsetof(GeometryVertex, pos)),
+        vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat,
+                                            offsetof(GeometryVertex, normal)),
+        vk::VertexInputAttributeDescription(
+            2, 0, vk::Format::eR32G32Sfloat,
+            offsetof(GeometryVertex, texCoord))};
+  }
+
+  bool operator==(const GeometryVertex &other) const {
+    return pos == other.pos && normal == other.normal &&
+           texCoord == other.texCoord;
+  }
+};
+
+template <> struct std::hash<GeometryVertex> {
+  size_t operator()(GeometryVertex const &vertex) const noexcept {
+    return ((hash<glm::vec3>()(vertex.pos) ^
+             (hash<glm::vec3>()(vertex.normal) << 1)) >>
+            1) ^
+           (hash<glm::vec2>()(vertex.texCoord) << 1);
+  }
+};
+
+struct FullscreenVertex {
+  glm::vec3 pos;
+  glm::vec2 uv;
+
+  static vk::VertexInputBindingDescription getBindingDescription() {
+    return {0, sizeof(FullscreenVertex), vk::VertexInputRate::eVertex};
+  }
+
+  static std::array<vk::VertexInputAttributeDescription, 2>
+  getAttributeDescriptions() {
+    return {
+        vk::VertexInputAttributeDescription(
+            0, 0, vk::Format::eR32G32B32Sfloat, offsetof(FullscreenVertex, pos)),
+        vk::VertexInputAttributeDescription(
+            1, 0, vk::Format::eR32G32Sfloat, offsetof(FullscreenVertex, uv)),
+    };
+  }
+};
+
+class ObjGeometryMesh : public TypedMesh<GeometryVertex> {
+public:
+  void loadModel(const std::string &path) {
+    auto objData = loadObjData(path);
+    auto mesh =
+        buildMeshFromObj<GeometryVertex>(objData, [](const ObjVertexRef &v) {
+          glm::vec3 n = v.normal();
+          if (glm::length(n) < 0.0001f) {
+            n = {0.0f, 0.0f, 1.0f};
+          } else {
+            n = glm::normalize(n);
+          }
+
+          return GeometryVertex{
+              .pos = v.position(), .normal = n, .texCoord = v.texCoord()};
+        });
+
+    setGeometry(std::vector<GeometryVertex>(mesh.vertexData().begin(),
+                                            mesh.vertexData().end()),
                 std::vector<uint32_t>(mesh.getIndices().begin(),
                                       mesh.getIndices().end()));
   }
 };
 
-using VertexMesh = TypedMesh<Vertex>;
+using FullscreenMesh = TypedMesh<FullscreenVertex>;
+
+inline FullscreenMesh buildFullscreenQuadMesh() {
+  FullscreenMesh mesh;
+  mesh.setGeometry(
+      {
+          {{-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},
+          {{1.0f, -1.0f, 0.0f}, {1.0f, 0.0f}},
+          {{1.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},
+          {{-1.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},
+      },
+      {0, 1, 2, 2, 3, 0});
+  return mesh;
+}

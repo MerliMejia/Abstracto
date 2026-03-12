@@ -1,14 +1,22 @@
 #include "backend/AppWindow.h"
 #include "backend/BackendConfig.h"
 #include "backend/VulkanBackend.h"
-#include "passes/DebugPresentPass.h"
-#include "passes/SolidTransformPass.h"
-#include "passes/TexturePass.h"
-#include "renderer/ForwardRenderer.h"
+#include "passes/GeometryPass.h"
+#include "passes/LightPass.h"
+#include "renderable/DescriptorBindings.h"
+#include "renderable/FrameUniforms.h"
+#include "renderable/Mesh.h"
+#include "renderable/Sampler.h"
+#include "renderable/Texture.h"
+#include "renderer/PassRenderer.h"
 #include "renderer/PipelineSpec.h"
+#include "renderer/RenderPass.h"
+#include "vulkan/vulkan.hpp"
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <memory>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -35,98 +43,109 @@ private:
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
 
-  TypedMesh<PositionUvVertex> modelMesh;
-  TypedMesh<PositionUvVertex> fullscreenQuadMesh;
-
-  std::vector<PositionUvVertex> quadVertices = {
-      {{-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f}},
-      {{1.0f, -1.0f, 0.0f}, {1.0f, 0.0f}},
-      {{1.0f, 1.0f, 0.0f}, {1.0f, 1.0f}},
-      {{-1.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},
-  };
-
-  std::vector<uint32_t> quadIndices = {
-      0, 1, 2, 2, 3, 0,
-  };
-
-  Texture albedoTexture;
-  ForwardRenderer renderer;
-  std::unique_ptr<SolidTransformPass> solidTransformPass;
-  std::unique_ptr<TexturePass> texturePass;
-  std::unique_ptr<DebugPresentPass> debugPresentPass;
+  PassRenderer renderer;
   std::vector<RenderItem> renderItems;
 
-  PipelineSpec solidSpec{
-      .shaderPath = "assets/shaders/solid_transform_pass.spv",
-  };
-
-  PipelineSpec textureSpec{
-      .shaderPath = "assets/shaders/texture_pass.spv",
-      .enableDepthTest = false,
-      .enableDepthWrite = false,
-      .enableBlending = false,
-  };
-
-  PipelineSpec debugPresentSpec{
-      .shaderPath = "assets/shaders/debug_present_pass.spv",
-      .enableDepthTest = false,
-      .enableDepthWrite = false,
-  };
+  ObjGeometryMesh mesh;
+  FullscreenMesh lightQuad;
+  FrameUniforms frameUniforms;
+  Texture albedoTexture;
+  Sampler sampler;
+  DescriptorBindings geometryBindings;
+  LightPass *lightPass = nullptr;
+  std::chrono::steady_clock::time_point lastFrameTime =
+      std::chrono::steady_clock::now();
+  float lightAzimuthRadians = glm::radians(225.0f);
+  float lightElevationRadians = glm::radians(-35.264f);
+  float lightIntensity = 1.0f;
 
   void initWindow() { window.create(WIDTH, HEIGHT, "Double Pass"); }
   void initVulkan() {
     backend.initialize(window, config);
-    auto objData = loadObjData(ASSET_PATH + "/models/viking_room.obj");
-    modelMesh = buildMeshFromObj<PositionUvVertex>(
-        objData, [](const ObjVertexRef &vertex) {
-          return PositionUvVertex{
-              .pos = vertex.position(),
-              .uv = vertex.texCoord(),
-          };
-        });
-    modelMesh.createVertexBuffer(commandContext(), deviceContext());
-    modelMesh.createIndexBuffer(commandContext(), deviceContext());
 
-    fullscreenQuadMesh.setGeometry(quadVertices, quadIndices);
-    fullscreenQuadMesh.createVertexBuffer(backend.commands(), backend.device());
-    fullscreenQuadMesh.createIndexBuffer(backend.commands(), backend.device());
+    mesh.loadModel(ASSET_PATH + "/models/viking_room.obj");
+    mesh.createVertexBuffer(commandContext(), deviceContext());
+    mesh.createIndexBuffer(commandContext(), deviceContext());
 
-    solidTransformPass =
-        std::make_unique<SolidTransformPass>(solidSpec, MAX_FRAMES_IN_FLIGHT);
+    albedoTexture.create(ASSET_PATH + "/textures/viking_room.png",
+                         commandContext(), deviceContext());
+    sampler.create(deviceContext());
 
-    auto *solidPassPtr = solidTransformPass.get();
-    renderer.addPass(std::move(solidTransformPass));
+    lightQuad = buildFullscreenQuadMesh();
+    lightQuad.createVertexBuffer(commandContext(), deviceContext());
+    lightQuad.createIndexBuffer(commandContext(), deviceContext());
 
-    RenderPass *presentPassPtr = nullptr;
-    if (DEBUG_SHOW_SOLID_TRANSFORM_PASS) {
-      debugPresentPass = std::make_unique<DebugPresentPass>(
-          debugPresentSpec, MAX_FRAMES_IN_FLIGHT, solidPassPtr);
-      presentPassPtr = debugPresentPass.get();
-      renderer.addPass(std::move(debugPresentPass));
-    } else {
-      albedoTexture.create("assets/textures/viking_room.png", commandContext(),
-                           deviceContext());
-      texturePass = std::make_unique<TexturePass>(
-          textureSpec, MAX_FRAMES_IN_FLIGHT, *solidPassPtr, albedoTexture);
-      presentPassPtr = texturePass.get();
-      renderer.addPass(std::move(texturePass));
-    }
+    auto geometryPass = std::make_unique<GeometryPass>(
+        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/geometry_pass.spv",
+                     .cullMode = vk::CullModeFlagBits::eBack,
+                     .frontFace = vk::FrontFace::eCounterClockwise});
+    auto *geometryPassPtr = geometryPass.get();
+    renderer.addPass(std::move(geometryPass));
+
+    auto lightPassLocal = std::make_unique<LightPass>(
+        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/light_pass.spv",
+                     .enableDepthTest = false,
+                     .enableDepthWrite = false},
+        MAX_FRAMES_IN_FLIGHT, geometryPassPtr);
+    lightPass = lightPassLocal.get();
+    renderer.addPass(std::move(lightPassLocal));
 
     renderer.initialize(deviceContext(), swapchainContext());
 
-    renderItems = {
-        RenderItem{
-            .mesh = &modelMesh,
-            .descriptorBindings = nullptr,
-            .targetPass = solidPassPtr,
-        },
-        RenderItem{
-            .mesh = &fullscreenQuadMesh,
-            .descriptorBindings = nullptr,
-            .targetPass = presentPassPtr,
-        },
-    };
+    frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
+    geometryBindings.create(deviceContext(), renderer.descriptorSetLayout(),
+                            frameUniforms, albedoTexture, sampler,
+                            MAX_FRAMES_IN_FLIGHT);
+
+    renderItems = {RenderItem{.mesh = &mesh,
+                              .descriptorBindings = &geometryBindings,
+                              .targetPass = geometryPassPtr},
+                   RenderItem{.mesh = &lightQuad,
+                              .descriptorBindings = nullptr,
+                              .targetPass = lightPass}};
   }
+
+  glm::vec3 currentLightDirectionWorld() const {
+    const float cosElevation = std::cos(lightElevationRadians);
+    return glm::normalize(
+        glm::vec3(cosElevation * std::cos(lightAzimuthRadians),
+                  cosElevation * std::sin(lightAzimuthRadians),
+                  std::sin(lightElevationRadians)));
+  }
+
+  void processLightControls(float deltaSeconds) {
+    const float orbitSpeed = glm::radians(90.0f);
+    const float intensitySpeed = 1.5f;
+
+    if (glfwGetKey(window.handle(), GLFW_KEY_LEFT) == GLFW_PRESS) {
+      lightAzimuthRadians -= orbitSpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_RIGHT) == GLFW_PRESS) {
+      lightAzimuthRadians += orbitSpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_UP) == GLFW_PRESS) {
+      lightElevationRadians += orbitSpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_DOWN) == GLFW_PRESS) {
+      lightElevationRadians -= orbitSpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_Q) == GLFW_PRESS) {
+      lightIntensity -= intensitySpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_E) == GLFW_PRESS) {
+      lightIntensity += intensitySpeed * deltaSeconds;
+    }
+    if (glfwGetKey(window.handle(), GLFW_KEY_R) == GLFW_PRESS) {
+      lightAzimuthRadians = glm::radians(225.0f);
+      lightElevationRadians = glm::radians(-35.264f);
+      lightIntensity = 1.0f;
+    }
+
+    lightElevationRadians = glm::clamp(
+        lightElevationRadians, glm::radians(-89.0f), glm::radians(89.0f));
+    lightIntensity = glm::clamp(lightIntensity, 0.0f, 5.0f);
+  }
+
   void drawFrame() {
     auto frameState = backend.beginFrame(window);
 
@@ -134,6 +153,42 @@ private:
       backend.recreateSwapchain(window);
       renderer.recreate(deviceContext(), swapchainContext());
       return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const float deltaSeconds = std::min(
+        std::chrono::duration<float>(now - lastFrameTime).count(), 0.1f);
+    lastFrameTime = now;
+
+    processLightControls(deltaSeconds);
+
+    UniformBufferObject ubo{};
+
+    ubo.model = glm::mat4(1.0f);
+
+    ubo.view =
+        glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+                    glm::vec3(0.0f, 0.0f, 1.0f));
+
+    ubo.proj = glm::perspective(
+        glm::radians(45.0f),
+        static_cast<float>(swapchainContext().extent2D().width) /
+            static_cast<float>(swapchainContext().extent2D().height),
+        0.1f, 10.0f);
+
+    // Vulkan inverts Y.
+    ubo.proj[1][1] *= -1.0f;
+
+    frameUniforms.write(frameState->frameIndex, ubo);
+
+    if (lightPass != nullptr) {
+      glm::vec3 lightDirectionWorld = currentLightDirectionWorld();
+      glm::vec3 lightDirectionView =
+          glm::normalize(glm::mat3(ubo.view) * lightDirectionWorld);
+
+      lightPass->setProjection(ubo.proj);
+      lightPass->setDirectionalLight(
+          lightDirectionView, glm::vec3(1.0f, 0.95f, 0.9f) * lightIntensity);
     }
 
     renderer.record(backend.commands().commandBuffer(frameState->frameIndex),

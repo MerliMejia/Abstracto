@@ -5,8 +5,13 @@
 #include "RenderPass.h"
 #include "SampledImageResource.h"
 #include "ShaderProgram.h"
+#include <algorithm>
 #include <array>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #include <vulkan/vulkan_raii.hpp>
@@ -32,6 +37,23 @@ inline DescriptorBindingSpec sampledImageBindingSpec(
   };
 }
 
+enum class RasterAttachmentFormat {
+  Auto,
+  RGBA8,
+  RGBA16F,
+  R32F,
+};
+
+struct RasterColorAttachmentConfig {
+  std::string name;
+  RasterAttachmentFormat format = RasterAttachmentFormat::Auto;
+  bool writeToSwapchain = false;
+  bool sampled = false;
+  std::array<float, 4> clearColor = {0.0f, 0.0f, 0.0f, 0.0f};
+  vk::AttachmentLoadOp loadOp = vk::AttachmentLoadOp::eClear;
+  vk::AttachmentStoreOp storeOp = vk::AttachmentStoreOp::eStore;
+};
+
 struct RasterPassAttachmentConfig {
   bool useColorAttachment = true;
   bool useDepthAttachment = true;
@@ -46,7 +68,12 @@ struct RasterPassAttachmentConfig {
   vk::AttachmentLoadOp colorLoadOp = vk::AttachmentLoadOp::eClear;
   vk::AttachmentStoreOp colorStoreOp = vk::AttachmentStoreOp::eStore;
   vk::AttachmentLoadOp depthLoadOp = vk::AttachmentLoadOp::eClear;
-  vk::AttachmentStoreOp depthStoreOp = vk::AttachmentStoreOp::eDontCare;
+  vk::AttachmentStoreOp depthStoreOp = vk::AttachmentStoreOp::eStore;
+
+  // If non-empty, these replace the legacy single-color attachment fields
+  // above and enable explicit multi-output pass declarations.
+  std::vector<RasterColorAttachmentConfig> colorAttachments;
+  bool sampleDepthAttachment = false;
 };
 
 using MeshPassAttachmentConfig = RasterPassAttachmentConfig;
@@ -86,15 +113,16 @@ public:
               const std::vector<RenderItem> &renderItems) override {
     transitionToRenderingLayouts(context);
 
-    auto colorAttachment = buildColorAttachment(context);
+    auto colorAttachments = buildColorAttachments(context);
     auto depthAttachment = buildDepthAttachment();
 
     vk::RenderingInfo renderingInfo = {
         .renderArea = {.offset = {0, 0},
                        .extent = context.swapchainContext.extent2D()},
         .layerCount = 1,
-        .colorAttachmentCount = colorAttachment ? 1u : 0u,
-        .pColorAttachments = colorAttachment ? &*colorAttachment : nullptr,
+        .colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size()),
+        .pColorAttachments =
+            colorAttachments.empty() ? nullptr : colorAttachments.data(),
         .pDepthAttachment = depthAttachment ? &*depthAttachment : nullptr};
 
     context.commandBuffer.beginRendering(renderingInfo);
@@ -120,48 +148,117 @@ public:
     return hasDescriptorSetLayout() ? &descriptorSetLayoutHandle : nullptr;
   }
 
-  bool hasOffscreenColorOutput() const {
-    return usesOffscreenColorAttachment();
+  uint32_t colorOutputCount() const {
+    if (usesExplicitColorAttachments()) {
+      return static_cast<uint32_t>(attachments.colorAttachments.size());
+    }
+    return attachments.useColorAttachment ? 1u : 0u;
   }
 
-  bool hasSampledColorOutput() const {
-    return usesOffscreenColorAttachment() && attachments.sampleColorAttachment;
+  bool hasOffscreenColorOutput() const {
+    return hasOffscreenColorOutput(0);
+  }
+
+  bool hasOffscreenColorOutput(uint32_t index) const {
+    validateColorOutputIndex(index);
+    return colorAttachmentIsOffscreen(index);
+  }
+
+  bool hasSampledColorOutput() const { return hasSampledColorOutput(0); }
+
+  bool hasSampledColorOutput(uint32_t index) const {
+    validateColorOutputIndex(index);
+    return colorAttachmentIsOffscreen(index) && colorAttachmentConfig(index).sampled;
+  }
+
+  std::optional<uint32_t> findColorOutput(std::string_view name) const {
+    if (name.empty()) {
+      return std::nullopt;
+    }
+
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      if (colorAttachmentConfig(i).name == name) {
+        return i;
+      }
+    }
+    return std::nullopt;
   }
 
   const vk::raii::ImageView &offscreenColorImageView() const {
-    if (!hasOffscreenColorOutput()) {
+    return offscreenColorImageView(0);
+  }
+
+  const vk::raii::ImageView &offscreenColorImageView(uint32_t index) const {
+    if (!hasOffscreenColorOutput(index)) {
       throw std::runtime_error(
-          "Render pass does not expose an offscreen color attachment");
+          "Render pass does not expose the requested offscreen color attachment");
     }
-    return colorImageView;
+    return colorAttachmentResources.at(index).imageView;
   }
 
   vk::Format offscreenColorImageFormat() const {
-    if (!hasOffscreenColorOutput()) {
+    return offscreenColorImageFormat(0);
+  }
+
+  vk::Format offscreenColorImageFormat(uint32_t index) const {
+    if (!hasOffscreenColorOutput(index)) {
       throw std::runtime_error(
-          "Render pass does not expose an offscreen color attachment");
+          "Render pass does not expose the requested offscreen color attachment");
     }
-    return colorImageFormat;
+    return colorAttachmentResources.at(index).format;
   }
 
   vk::ImageLayout offscreenColorImageLayout() const {
-    if (!hasOffscreenColorOutput()) {
-      throw std::runtime_error(
-          "Render pass does not expose an offscreen color attachment");
-    }
-    return colorImageLayout;
+    return offscreenColorImageLayout(0);
   }
 
-  SampledImageResource
-  sampledColorOutput(const vk::raii::Sampler &sampler) const {
-    if (!hasSampledColorOutput()) {
+  vk::ImageLayout offscreenColorImageLayout(uint32_t index) const {
+    if (!hasOffscreenColorOutput(index)) {
       throw std::runtime_error(
-          "Render pass does not expose a sampled offscreen color attachment");
+          "Render pass does not expose the requested offscreen color attachment");
+    }
+    return colorAttachmentResources.at(index).layout;
+  }
+
+  SampledImageResource sampledColorOutput(const vk::raii::Sampler &sampler) const {
+    return sampledColorOutput(0, sampler);
+  }
+
+  SampledImageResource sampledColorOutput(uint32_t index,
+                                          const vk::raii::Sampler &sampler) const {
+    if (!hasSampledColorOutput(index)) {
+      throw std::runtime_error(
+          "Render pass does not expose the requested sampled color attachment");
     }
     return SampledImageResource{
-        .imageView = colorImageView,
+        .imageView = colorAttachmentResources.at(index).imageView,
         .sampler = sampler,
         .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+    };
+  }
+
+  bool hasDepthOutput() const { return attachments.useDepthAttachment; }
+
+  bool hasSampledDepthOutput() const {
+    return attachments.useDepthAttachment && attachments.sampleDepthAttachment;
+  }
+
+  const vk::raii::ImageView &depthImageView() const {
+    if (!hasDepthOutput()) {
+      throw std::runtime_error("Render pass does not expose a depth attachment");
+    }
+    return depthImageViewHandle;
+  }
+
+  SampledImageResource sampledDepthOutput(const vk::raii::Sampler &sampler) const {
+    if (!hasSampledDepthOutput()) {
+      throw std::runtime_error(
+          "Render pass does not expose a sampled depth attachment");
+    }
+    return SampledImageResource{
+        .imageView = depthImageViewHandle,
+        .sampler = sampler,
+        .imageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal,
     };
   }
 
@@ -213,6 +310,14 @@ protected:
   }
 
 private:
+  struct ColorAttachmentResource {
+    vk::raii::Image image = nullptr;
+    vk::raii::DeviceMemory memory = nullptr;
+    vk::raii::ImageView imageView = nullptr;
+    vk::Format format = vk::Format::eUndefined;
+    vk::ImageLayout layout = vk::ImageLayout::eUndefined;
+  };
+
   PipelineSpec spec;
   RasterPassAttachmentConfig attachments;
   ShaderProgram shaderProgram;
@@ -221,15 +326,11 @@ private:
   vk::raii::PipelineLayout pipelineLayout = nullptr;
   vk::raii::Pipeline graphicsPipeline = nullptr;
 
-  vk::raii::Image colorImage = nullptr;
-  vk::raii::DeviceMemory colorImageMemory = nullptr;
-  vk::raii::ImageView colorImageView = nullptr;
-  vk::Format colorImageFormat = vk::Format::eUndefined;
+  std::vector<ColorAttachmentResource> colorAttachmentResources;
 
   vk::raii::Image depthImage = nullptr;
   vk::raii::DeviceMemory depthImageMemory = nullptr;
-  vk::raii::ImageView depthImageView = nullptr;
-  vk::ImageLayout colorImageLayout = vk::ImageLayout::eUndefined;
+  vk::raii::ImageView depthImageViewHandle = nullptr;
   vk::ImageLayout depthImageLayout = vk::ImageLayout::eUndefined;
   std::vector<vk::ImageLayout> swapchainImageLayouts;
 
@@ -318,25 +419,29 @@ private:
         .colorWriteMask =
             vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
             vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA};
+    std::vector<vk::PipelineColorBlendAttachmentState> colorBlendAttachments(
+        colorOutputCount(), colorBlendAttachment);
     vk::PipelineColorBlendStateCreateInfo colorBlending{
         .logicOpEnable = vk::False,
         .logicOp = vk::LogicOp::eCopy,
-        .attachmentCount = attachments.useColorAttachment ? 1u : 0u,
+        .attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size()),
         .pAttachments =
-            attachments.useColorAttachment ? &colorBlendAttachment : nullptr};
+            colorBlendAttachments.empty() ? nullptr : colorBlendAttachments.data()};
     std::vector dynamicStates = {vk::DynamicState::eViewport,
                                  vk::DynamicState::eScissor};
     vk::PipelineDynamicStateCreateInfo dynamicState{
         .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data()};
 
-    vk::Format colorFormat = colorAttachmentFormat(swapchainContext);
+    std::vector<vk::Format> colorFormats;
+    colorFormats.reserve(colorOutputCount());
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      colorFormats.push_back(colorAttachmentFormat(swapchainContext, i));
+    }
+
     vk::Format depthFormat = attachments.useDepthAttachment
                                  ? deviceContext.findDepthFormat()
                                  : vk::Format::eUndefined;
-    uint32_t colorAttachmentCount = attachments.useColorAttachment ? 1u : 0u;
-    const vk::Format *colorAttachmentFormats =
-        attachments.useColorAttachment ? &colorFormat : nullptr;
 
     vk::StructureChain<vk::GraphicsPipelineCreateInfo,
                        vk::PipelineRenderingCreateInfo>
@@ -353,8 +458,9 @@ private:
              .pDynamicState = &dynamicState,
              .layout = pipelineLayout,
              .renderPass = nullptr},
-            {.colorAttachmentCount = colorAttachmentCount,
-             .pColorAttachmentFormats = colorAttachmentFormats,
+            {.colorAttachmentCount = static_cast<uint32_t>(colorFormats.size()),
+             .pColorAttachmentFormats =
+                 colorFormats.empty() ? nullptr : colorFormats.data(),
              .depthAttachmentFormat = depthFormat}};
 
     graphicsPipeline = vk::raii::Pipeline(
@@ -364,13 +470,14 @@ private:
 
   void createAttachmentResources(DeviceContext &deviceContext,
                                  SwapchainContext &swapchainContext) {
-    if (usesOwnedColorAttachment()) {
-      createColorResources(deviceContext, swapchainContext);
-    } else {
-      colorImage = nullptr;
-      colorImageMemory = nullptr;
-      colorImageView = nullptr;
-      colorImageFormat = vk::Format::eUndefined;
+    colorAttachmentResources.clear();
+    colorAttachmentResources.reserve(colorOutputCount());
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      ColorAttachmentResource resource;
+      if (colorAttachmentIsOffscreen(i)) {
+        createColorResource(deviceContext, swapchainContext, i, resource);
+      }
+      colorAttachmentResources.push_back(std::move(resource));
     }
 
     if (attachments.useDepthAttachment) {
@@ -378,23 +485,20 @@ private:
     } else {
       depthImage = nullptr;
       depthImageMemory = nullptr;
-      depthImageView = nullptr;
+      depthImageViewHandle = nullptr;
+      depthImageLayout = vk::ImageLayout::eUndefined;
     }
 
-    colorImageLayout = vk::ImageLayout::eUndefined;
-    depthImageLayout = vk::ImageLayout::eUndefined;
     swapchainImageLayouts.assign(swapchainContext.imageCount(),
                                  vk::ImageLayout::eUndefined);
   }
 
-  void createColorResources(DeviceContext &deviceContext,
-                            SwapchainContext &swapchainContext) {
-    vk::Format colorFormat = colorAttachmentFormat(swapchainContext);
+  void createColorResource(DeviceContext &deviceContext,
+                           SwapchainContext &swapchainContext, uint32_t index,
+                           ColorAttachmentResource &resource) {
+    vk::Format colorFormat = colorAttachmentFormat(swapchainContext, index);
     vk::ImageUsageFlags imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
-    if (attachments.useMsaaColorAttachment) {
-      imageUsage |= vk::ImageUsageFlagBits::eTransientAttachment;
-    }
-    if (attachments.sampleColorAttachment) {
+    if (colorAttachmentConfig(index).sampled) {
       imageUsage |= vk::ImageUsageFlagBits::eSampled;
     }
 
@@ -403,25 +507,31 @@ private:
                              rasterizationSampleCount(deviceContext),
                              colorFormat, vk::ImageTiling::eOptimal, imageUsage,
                              vk::MemoryPropertyFlagBits::eDeviceLocal,
-                             colorImage, colorImageMemory);
-    colorImageView = createImageView(deviceContext, colorImage, colorFormat,
-                                     vk::ImageAspectFlagBits::eColor, 1);
-    colorImageFormat = colorFormat;
+                             resource.image, resource.memory);
+    resource.imageView = createImageView(deviceContext, resource.image,
+                                         colorFormat,
+                                         vk::ImageAspectFlagBits::eColor, 1);
+    resource.format = colorFormat;
+    resource.layout = vk::ImageLayout::eUndefined;
   }
 
   void createDepthResources(DeviceContext &deviceContext,
                             SwapchainContext &swapchainContext) {
     vk::Format depthFormat = deviceContext.findDepthFormat();
+    vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eDepthStencilAttachment;
+    if (attachments.sampleDepthAttachment) {
+      usage |= vk::ImageUsageFlagBits::eSampled;
+    }
 
     RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
                              swapchainContext.extent2D().height, 1,
                              rasterizationSampleCount(deviceContext),
-                             depthFormat, vk::ImageTiling::eOptimal,
-                             vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                             depthFormat, vk::ImageTiling::eOptimal, usage,
                              vk::MemoryPropertyFlagBits::eDeviceLocal,
                              depthImage, depthImageMemory);
-    depthImageView = createImageView(deviceContext, depthImage, depthFormat,
-                                     vk::ImageAspectFlagBits::eDepth, 1);
+    depthImageViewHandle = createImageView(deviceContext, depthImage, depthFormat,
+                                           vk::ImageAspectFlagBits::eDepth, 1);
+    depthImageLayout = vk::ImageLayout::eUndefined;
   }
 
   vk::raii::ImageView createImageView(DeviceContext &deviceContext,
@@ -451,21 +561,23 @@ private:
       swapchainImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
     }
 
-    if (usesOwnedColorAttachment()) {
-      transitionImageLayout(context.commandBuffer, *colorImage,
-                            colorImageLayout,
-                            vk::ImageLayout::eColorAttachmentOptimal,
-                            layoutAccessMask(colorImageLayout),
-                            vk::AccessFlagBits2::eColorAttachmentWrite,
-                            layoutStageMask(colorImageLayout),
-                            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                            vk::ImageAspectFlagBits::eColor);
-      colorImageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      if (!colorAttachmentIsOffscreen(i)) {
+        continue;
+      }
+
+      auto &resource = colorAttachmentResources.at(i);
+      transitionImageLayout(
+          context.commandBuffer, *resource.image, resource.layout,
+          vk::ImageLayout::eColorAttachmentOptimal, layoutAccessMask(resource.layout),
+          vk::AccessFlagBits2::eColorAttachmentWrite, layoutStageMask(resource.layout),
+          vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+          vk::ImageAspectFlagBits::eColor);
+      resource.layout = vk::ImageLayout::eColorAttachmentOptimal;
     }
 
     if (attachments.useDepthAttachment) {
-      transitionImageLayout(context.commandBuffer, *depthImage,
-                            depthImageLayout,
+      transitionImageLayout(context.commandBuffer, *depthImage, depthImageLayout,
                             vk::ImageLayout::eDepthAttachmentOptimal,
                             layoutAccessMask(depthImageLayout),
                             vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -478,15 +590,30 @@ private:
   }
 
   void transitionToFinalLayouts(const RenderPassContext &context) {
-    if (hasSampledColorOutput()) {
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      if (!hasSampledColorOutput(i)) {
+        continue;
+      }
+
+      auto &resource = colorAttachmentResources.at(i);
       transitionImageLayout(
-          context.commandBuffer, *colorImage, colorImageLayout,
-          vk::ImageLayout::eShaderReadOnlyOptimal,
-          layoutAccessMask(colorImageLayout), vk::AccessFlagBits2::eShaderRead,
-          layoutStageMask(colorImageLayout),
+          context.commandBuffer, *resource.image, resource.layout,
+          vk::ImageLayout::eShaderReadOnlyOptimal, layoutAccessMask(resource.layout),
+          vk::AccessFlagBits2::eShaderRead, layoutStageMask(resource.layout),
           vk::PipelineStageFlagBits2::eFragmentShader,
           vk::ImageAspectFlagBits::eColor);
-      colorImageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+      resource.layout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    }
+
+    if (attachments.sampleDepthAttachment && attachments.useDepthAttachment) {
+      transitionImageLayout(
+          context.commandBuffer, *depthImage, depthImageLayout,
+          vk::ImageLayout::eDepthStencilReadOnlyOptimal,
+          layoutAccessMask(depthImageLayout), vk::AccessFlagBits2::eShaderRead,
+          layoutStageMask(depthImageLayout),
+          vk::PipelineStageFlagBits2::eFragmentShader,
+          vk::ImageAspectFlagBits::eDepth);
+      depthImageLayout = vk::ImageLayout::eDepthStencilReadOnlyOptimal;
     }
 
     if (writesToSwapchain()) {
@@ -503,49 +630,55 @@ private:
     }
   }
 
-  std::optional<vk::RenderingAttachmentInfo>
-  buildColorAttachment(const RenderPassContext &context) const {
-    if (!attachments.useColorAttachment) {
-      return std::nullopt;
+  std::vector<vk::RenderingAttachmentInfo>
+  buildColorAttachments(const RenderPassContext &context) const {
+    std::vector<vk::RenderingAttachmentInfo> result;
+    result.reserve(colorOutputCount());
+    for (uint32_t i = 0; i < colorOutputCount(); ++i) {
+      result.push_back(buildColorAttachment(context, i));
     }
+    return result;
+  }
 
-    vk::ClearValue clearColor = {.color = {.float32 = attachments.clearColor}};
+  vk::RenderingAttachmentInfo
+  buildColorAttachment(const RenderPassContext &context, uint32_t index) const {
+    const auto attachment = colorAttachmentConfig(index);
+    vk::ClearValue clearColor = {.color = {.float32 = attachment.clearColor}};
 
-    if (attachments.useMsaaColorAttachment) {
+    if (!usesExplicitColorAttachments() && attachments.useMsaaColorAttachment) {
       return vk::RenderingAttachmentInfo{
-          .imageView = colorImageView,
+          .imageView = colorAttachmentResources.at(index).imageView,
           .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
           .resolveMode = attachments.resolveToSwapchain
                              ? vk::ResolveModeFlagBits::eAverage
                              : vk::ResolveModeFlagBits::eNone,
           .resolveImageView =
               attachments.resolveToSwapchain
-                  ? context.swapchainContext
-                        .swapchainImageViews()[context.imageIndex]
+                  ? context.swapchainContext.swapchainImageViews()[context.imageIndex]
                   : vk::ImageView(),
           .resolveImageLayout = attachments.resolveToSwapchain
                                     ? vk::ImageLayout::eColorAttachmentOptimal
                                     : vk::ImageLayout::eUndefined,
-          .loadOp = attachments.colorLoadOp,
-          .storeOp = attachments.colorStoreOp,
+          .loadOp = attachment.loadOp,
+          .storeOp = attachment.storeOp,
           .clearValue = clearColor};
     }
 
-    if (usesOffscreenColorAttachment()) {
+    if (attachment.writeToSwapchain) {
       return vk::RenderingAttachmentInfo{
-          .imageView = colorImageView,
+          .imageView =
+              context.swapchainContext.swapchainImageViews()[context.imageIndex],
           .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-          .loadOp = attachments.colorLoadOp,
-          .storeOp = attachments.colorStoreOp,
+          .loadOp = attachment.loadOp,
+          .storeOp = attachment.storeOp,
           .clearValue = clearColor};
     }
 
     return vk::RenderingAttachmentInfo{
-        .imageView =
-            context.swapchainContext.swapchainImageViews()[context.imageIndex],
+        .imageView = colorAttachmentResources.at(index).imageView,
         .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp = attachments.colorLoadOp,
-        .storeOp = attachments.colorStoreOp,
+        .loadOp = attachment.loadOp,
+        .storeOp = attachment.storeOp,
         .clearValue = clearColor};
   }
 
@@ -558,7 +691,7 @@ private:
         .depthStencil = vk::ClearDepthStencilValue{attachments.clearDepth,
                                                    attachments.clearStencil}};
     return vk::RenderingAttachmentInfo{
-        .imageView = depthImageView,
+        .imageView = depthImageViewHandle,
         .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
         .loadOp = attachments.depthLoadOp,
         .storeOp = attachments.depthStoreOp,
@@ -567,11 +700,21 @@ private:
 
   vk::SampleCountFlagBits
   rasterizationSampleCount(DeviceContext &deviceContext) const {
+    if (usesExplicitColorAttachments()) {
+      return vk::SampleCountFlagBits::e1;
+    }
     return attachments.useMsaaColorAttachment ? deviceContext.msaaSampleCount()
                                               : vk::SampleCountFlagBits::e1;
   }
 
   bool writesToSwapchain() const {
+    if (usesExplicitColorAttachments()) {
+      return std::any_of(
+          attachments.colorAttachments.begin(), attachments.colorAttachments.end(),
+          [](const RasterColorAttachmentConfig &attachment) {
+            return attachment.writeToSwapchain;
+          });
+    }
     return usesSwapchainColorAttachment() || attachments.resolveToSwapchain;
   }
 
@@ -587,24 +730,55 @@ private:
            !attachments.useMsaaColorAttachment;
   }
 
-  bool usesOwnedColorAttachment() const {
-    return attachments.useColorAttachment &&
-           (attachments.useMsaaColorAttachment ||
-            usesOffscreenColorAttachment());
-  }
-
   bool hasDescriptorSetLayout() const {
     return static_cast<vk::DescriptorSetLayout>(descriptorSetLayoutHandle) !=
            VK_NULL_HANDLE;
   }
 
-  vk::Format
-  colorAttachmentFormat(const SwapchainContext &swapchainContext) const {
-    if (usesOffscreenColorAttachment() &&
-        attachments.offscreenColorFormat != vk::Format::eUndefined) {
-      return attachments.offscreenColorFormat;
+  bool usesExplicitColorAttachments() const {
+    return !attachments.colorAttachments.empty();
+  }
+
+  RasterColorAttachmentConfig colorAttachmentConfig(uint32_t index) const {
+    validateColorOutputIndex(index);
+    if (usesExplicitColorAttachments()) {
+      return attachments.colorAttachments.at(index);
+    }
+
+    return RasterColorAttachmentConfig{
+        .name = "color0",
+        .format = attachments.offscreenColorFormat != vk::Format::eUndefined
+                      ? fromVkFormat(attachments.offscreenColorFormat)
+                      : RasterAttachmentFormat::Auto,
+        .writeToSwapchain =
+            attachments.useSwapchainColorAttachment && !attachments.useMsaaColorAttachment,
+        .sampled = attachments.sampleColorAttachment,
+        .clearColor = attachments.clearColor,
+        .loadOp = attachments.colorLoadOp,
+        .storeOp = attachments.colorStoreOp,
+    };
+  }
+
+  bool colorAttachmentIsOffscreen(uint32_t index) const {
+    return !colorAttachmentConfig(index).writeToSwapchain;
+  }
+
+  vk::Format colorAttachmentFormat(const SwapchainContext &swapchainContext,
+                                   uint32_t index) const {
+    auto attachment = colorAttachmentConfig(index);
+    if (attachment.writeToSwapchain) {
+      return swapchainContext.surfaceFormatInfo().format;
+    }
+    if (attachment.format != RasterAttachmentFormat::Auto) {
+      return toVkFormat(attachment.format);
     }
     return swapchainContext.surfaceFormatInfo().format;
+  }
+
+  void validateColorOutputIndex(uint32_t index) const {
+    if (index >= colorOutputCount()) {
+      throw std::runtime_error("Color attachment index out of range");
+    }
   }
 
   vk::AccessFlags2 layoutAccessMask(vk::ImageLayout layout) const {
@@ -614,6 +788,7 @@ private:
     case vk::ImageLayout::eDepthAttachmentOptimal:
       return vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
     case vk::ImageLayout::eShaderReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
       return vk::AccessFlagBits2::eShaderRead;
     default:
       return {};
@@ -628,6 +803,7 @@ private:
       return vk::PipelineStageFlagBits2::eEarlyFragmentTests |
              vk::PipelineStageFlagBits2::eLateFragmentTests;
     case vk::ImageLayout::eShaderReadOnlyOptimal:
+    case vk::ImageLayout::eDepthStencilReadOnlyOptimal:
       return vk::PipelineStageFlagBits2::eFragmentShader;
     case vk::ImageLayout::ePresentSrcKHR:
       return vk::PipelineStageFlagBits2::eBottomOfPipe;
@@ -637,6 +813,20 @@ private:
   }
 
   void validateAttachmentConfig() const {
+    if (usesExplicitColorAttachments()) {
+      const auto swapchainOutputCount =
+          std::count_if(attachments.colorAttachments.begin(),
+                        attachments.colorAttachments.end(),
+                        [](const RasterColorAttachmentConfig &attachment) {
+                          return attachment.writeToSwapchain;
+                        });
+      if (swapchainOutputCount > 1) {
+        throw std::runtime_error(
+            "Only one explicit color attachment may target the swapchain");
+      }
+      return;
+    }
+
     if (attachments.sampleColorAttachment && !usesOffscreenColorAttachment()) {
       throw std::runtime_error("sampleColorAttachment requires a "
                                "single-sampled offscreen color attachment");
@@ -648,6 +838,33 @@ private:
     if (attachments.resolveToSwapchain && !attachments.useColorAttachment) {
       throw std::runtime_error(
           "resolveToSwapchain requires useColorAttachment to be enabled");
+    }
+  }
+
+  static vk::Format toVkFormat(RasterAttachmentFormat format) {
+    switch (format) {
+    case RasterAttachmentFormat::RGBA8:
+      return vk::Format::eR8G8B8A8Unorm;
+    case RasterAttachmentFormat::RGBA16F:
+      return vk::Format::eR16G16B16A16Sfloat;
+    case RasterAttachmentFormat::R32F:
+      return vk::Format::eR32Sfloat;
+    case RasterAttachmentFormat::Auto:
+    default:
+      return vk::Format::eUndefined;
+    }
+  }
+
+  static RasterAttachmentFormat fromVkFormat(vk::Format format) {
+    switch (format) {
+    case vk::Format::eR8G8B8A8Unorm:
+      return RasterAttachmentFormat::RGBA8;
+    case vk::Format::eR16G16B16A16Sfloat:
+      return RasterAttachmentFormat::RGBA16F;
+    case vk::Format::eR32Sfloat:
+      return RasterAttachmentFormat::R32F;
+    default:
+      return RasterAttachmentFormat::Auto;
     }
   }
 
