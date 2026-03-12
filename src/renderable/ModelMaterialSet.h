@@ -41,6 +41,16 @@ public:
     return materialResources[materialIndex].bindings;
   }
 
+  void updateMaterialParameters(
+      const std::vector<ModelMaterialData> &materials) {
+    const size_t updateCount =
+        std::min(materials.size(), materialResources.size());
+    for (size_t i = 0; i < updateCount; ++i) {
+      materialResources[i].bindings.updateMaterialUniform(
+          buildMaterialUniform(materials[i]));
+    }
+  }
+
 private:
   struct MaterialResource {
     Texture baseColorTexture;
@@ -87,6 +97,16 @@ private:
                              encoding);
   }
 
+  static MaterialUniformData
+  buildMaterialUniform(const ModelMaterialData &material) {
+    return MaterialUniformData{
+        .baseColorFactor = material.baseColorFactor,
+        .emissiveFactor = glm::vec4(material.emissiveFactor, 1.0f),
+        .surfaceParams = {material.metallicFactor, material.roughnessFactor,
+                          material.normalScale, material.occlusionStrength},
+    };
+  }
+
   void initializeResource(
       MaterialResource &resource, const ModelMaterialData *material,
       DeviceContext &deviceContext, CommandContext &commandContext,
@@ -117,13 +137,7 @@ private:
                             {255, 255, 255, 255}, TextureEncoding::Linear,
                             commandContext, deviceContext);
 
-    MaterialUniformData materialUniform{
-        .baseColorFactor = resolvedMaterial.baseColorFactor,
-        .emissiveFactor = glm::vec4(resolvedMaterial.emissiveFactor, 1.0f),
-        .surfaceParams =
-            {resolvedMaterial.metallicFactor, resolvedMaterial.roughnessFactor,
-             resolvedMaterial.normalScale, resolvedMaterial.occlusionStrength},
-    };
+    MaterialUniformData materialUniform = buildMaterialUniform(resolvedMaterial);
 
     resource.bindings.create(
         deviceContext, descriptorSetLayout, frameUniforms,

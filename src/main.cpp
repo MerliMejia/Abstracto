@@ -3,6 +3,7 @@
 #include "backend/VulkanBackend.h"
 #include "passes/DebugPass.h"
 #include "passes/GeometryPass.h"
+#include "passes/ImGuiPass.h"
 #include "passes/PbrPass.h"
 #include "renderable/FrameUniforms.h"
 #include "renderable/RenderableModel.h"
@@ -17,11 +18,12 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <imgui.h>
 #include <iostream>
 #include <memory>
 
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t WIDTH = 1280;
+constexpr uint32_t HEIGHT = 720;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
 const std::string ASSET_PATH = "assets";
@@ -44,38 +46,6 @@ std::string normalizedMaterialName(std::string_view name) {
   }
 
   return normalized;
-}
-
-void applyToyCarMaterialTweaks(std::vector<ModelMaterialData> &materials) {
-  for (auto &material : materials) {
-    const std::string name = normalizedMaterialName(material.name);
-
-    if (name == "toycar") {
-      material.roughnessFactor *= 0.55f;
-      material.occlusionStrength *= 0.65f;
-      material.normalScale *= 0.8f;
-      continue;
-    }
-
-    if (name == "fabric") {
-      material.baseColorFactor *= glm::vec4(2.35f, 2.0f, 2.0f, 1.0f);
-      material.roughnessFactor =
-          glm::clamp(material.roughnessFactor, 0.85f, 1.0f);
-      material.occlusionStrength *= 0.35f;
-      material.normalScale *= 0.7f;
-      material.emissiveFactor += glm::vec3(0.06f, 0.0f, 0.0f);
-      continue;
-    }
-
-    if (name == "glass") {
-      material.baseColorFactor = {0.85f, 0.95f, 1.0f, 1.0f};
-      material.metallicFactor = 0.0f;
-      material.roughnessFactor = 0.02f;
-      material.normalScale = 0.0f;
-      material.occlusionStrength = 0.0f;
-      material.emissiveFactor = {0.08f, 0.1f, 0.12f};
-    }
-  }
 }
 
 class DoublePassApp {
@@ -106,12 +76,15 @@ private:
   Sampler sampler;
   PbrPass *pbrPass = nullptr;
   DebugPass *debugPass = nullptr;
+  ImGuiPass *imguiPass = nullptr;
   std::chrono::steady_clock::time_point lastFrameTime =
       std::chrono::steady_clock::now();
   float lightAzimuthRadians = glm::radians(225.0f);
   float lightElevationRadians = glm::radians(-35.264f);
   float lightIntensity = 1.0f;
+  glm::vec3 lightColor = {1.0f, 0.95f, 0.9f};
   PresentedOutput presentedOutput = PresentedOutput::Light;
+  int selectedMaterialIndex = 0;
 
   void initWindow() { window.create(WIDTH, HEIGHT, "Double Pass"); }
 
@@ -149,13 +122,18 @@ private:
     debugPass->setSelectedOutput(static_cast<uint32_t>(presentedOutput));
     renderer.addPass(std::move(debugPassLocal));
 
+    auto imguiPassLocal = std::make_unique<ImGuiPass>(
+        window, backend.instance(), commandContext());
+    imguiPass = imguiPassLocal.get();
+    renderer.addPass(std::move(imguiPassLocal));
+
     renderer.initialize(deviceContext(), swapchainContext());
 
     frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.loadFromFile(
-        ASSET_PATH + "/models/toy_car.glb", commandContext(), deviceContext(),
-        renderer.descriptorSetLayout(), frameUniforms, sampler,
-        MAX_FRAMES_IN_FLIGHT, applyToyCarMaterialTweaks);
+    sceneModel.loadFromFile(ASSET_PATH + "/models/toy_car.glb",
+                            commandContext(), deviceContext(),
+                            renderer.descriptorSetLayout(), frameUniforms,
+                            sampler, MAX_FRAMES_IN_FLIGHT);
 
     renderItems = sceneModel.buildRenderItems(geometryPassPtr);
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
@@ -164,6 +142,115 @@ private:
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
                                      .descriptorBindings = nullptr,
                                      .targetPass = debugPass});
+  }
+
+  bool buildMaterialEditorUi() {
+    bool materialChanged = false;
+    auto &materials = sceneModel.mutableMaterials();
+    if (materials.empty()) {
+      return false;
+    }
+
+    selectedMaterialIndex = std::clamp(selectedMaterialIndex, 0,
+                                       static_cast<int>(materials.size()) - 1);
+
+    ImGui::Begin("Materials");
+    for (int index = 0; index < static_cast<int>(materials.size()); ++index) {
+      const bool selected = selectedMaterialIndex == index;
+      const char *label = materials[index].name.empty()
+                              ? "<unnamed>"
+                              : materials[index].name.c_str();
+      if (ImGui::Selectable(label, selected)) {
+        selectedMaterialIndex = index;
+      }
+    }
+    ImGui::End();
+
+    auto &material = materials[static_cast<size_t>(selectedMaterialIndex)];
+    ImGui::Begin("Material Properties");
+    ImGui::Text("Selected: %s",
+                material.name.empty() ? "<unnamed>" : material.name.c_str());
+    materialChanged |=
+        ImGui::ColorEdit4("Base Color", &material.baseColorFactor.x);
+    materialChanged |=
+        ImGui::ColorEdit3("Emissive", &material.emissiveFactor.x);
+    materialChanged |=
+        ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
+    materialChanged |=
+        ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
+    materialChanged |=
+        ImGui::SliderFloat("Normal Scale", &material.normalScale, 0.0f, 2.0f);
+    materialChanged |= ImGui::SliderFloat(
+        "Occlusion Strength", &material.occlusionStrength, 0.0f, 1.0f);
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Textures");
+    ImGui::BulletText("Base Color: %s",
+                      material.baseColorTexture.hasPath() ||
+                              material.baseColorTexture.hasEmbeddedRgba()
+                          ? "yes"
+                          : "no");
+    ImGui::BulletText(
+        "Metallic/Roughness: %s",
+        material.metallicRoughnessTexture.hasPath() ||
+                material.metallicRoughnessTexture.hasEmbeddedRgba()
+            ? "yes"
+            : "no");
+    ImGui::BulletText("Normal: %s",
+                      material.normalTexture.hasPath() ||
+                              material.normalTexture.hasEmbeddedRgba()
+                          ? "yes"
+                          : "no");
+    ImGui::BulletText("Emissive: %s",
+                      material.emissiveTexture.hasPath() ||
+                              material.emissiveTexture.hasEmbeddedRgba()
+                          ? "yes"
+                          : "no");
+    ImGui::BulletText("Occlusion: %s",
+                      material.occlusionTexture.hasPath() ||
+                              material.occlusionTexture.hasEmbeddedRgba()
+                          ? "yes"
+                          : "no");
+    ImGui::End();
+
+    return materialChanged;
+  }
+
+  void buildLightUi() {
+    ImGui::Begin("Light");
+    float azimuthDegrees = glm::degrees(lightAzimuthRadians);
+    float elevationDegrees = glm::degrees(lightElevationRadians);
+    if (ImGui::SliderFloat("Azimuth", &azimuthDegrees, -180.0f, 180.0f)) {
+      lightAzimuthRadians = glm::radians(azimuthDegrees);
+    }
+    if (ImGui::SliderFloat("Elevation", &elevationDegrees, -89.0f, 89.0f)) {
+      lightElevationRadians = glm::radians(elevationDegrees);
+    }
+    ImGui::SliderFloat("Intensity", &lightIntensity, 0.0f, 20.0f);
+    ImGui::ColorEdit3("Color", &lightColor.x);
+    ImGui::Text("Direction: %.2f %.2f %.2f", currentLightDirectionWorld().x,
+                currentLightDirectionWorld().y, currentLightDirectionWorld().z);
+    ImGui::End();
+  }
+
+  void buildDebugUi() {
+    ImGui::Begin("View");
+    int output = static_cast<int>(presentedOutput);
+    ImGui::RadioButton("Material", &output,
+                       static_cast<int>(PresentedOutput::Material));
+    ImGui::RadioButton("Albedo", &output,
+                       static_cast<int>(PresentedOutput::Albedo));
+    ImGui::RadioButton("Depth", &output,
+                       static_cast<int>(PresentedOutput::Depth));
+    ImGui::RadioButton("Normal", &output,
+                       static_cast<int>(PresentedOutput::Normal));
+    ImGui::RadioButton("Lit", &output,
+                       static_cast<int>(PresentedOutput::Light));
+    presentedOutput = static_cast<PresentedOutput>(output);
+    if (debugPass != nullptr) {
+      debugPass->setSelectedOutput(static_cast<uint32_t>(presentedOutput));
+    }
+    ImGui::End();
   }
 
   glm::vec3 currentLightDirectionWorld() const {
@@ -204,7 +291,6 @@ private:
 
     lightElevationRadians = glm::clamp(
         lightElevationRadians, glm::radians(-89.0f), glm::radians(89.0f));
-    lightIntensity = glm::clamp(lightIntensity, 0.0f, 5.0f);
   }
 
   void processDebugControls() {
@@ -246,6 +332,17 @@ private:
     processLightControls(deltaSeconds);
     processDebugControls();
 
+    if (imguiPass != nullptr) {
+      imguiPass->beginFrame();
+      const bool materialChanged = buildMaterialEditorUi();
+      buildLightUi();
+      buildDebugUi();
+      if (materialChanged) {
+        sceneModel.syncMaterialParameters();
+      }
+      imguiPass->endFrame();
+    }
+
     UniformBufferObject ubo{};
 
     ubo.model = glm::scale(glm::mat4(1.0f), glm::vec3(40.0f));
@@ -275,8 +372,8 @@ private:
           glm::normalize(glm::mat3(ubo.view) * lightDirectionWorld);
 
       pbrPass->setProjection(ubo.proj);
-      pbrPass->setDirectionalLight(
-          lightDirectionView, glm::vec3(1.0f, 0.95f, 0.9f) * lightIntensity);
+      pbrPass->setDirectionalLight(lightDirectionView,
+                                   lightColor * lightIntensity);
     }
 
     renderer.record(backend.commands().commandBuffer(frameState->frameIndex),

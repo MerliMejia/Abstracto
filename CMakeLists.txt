@@ -56,6 +56,13 @@ if(ABSTRACTO_FETCH_DEPS)
     GIT_TAG v2.9.5
   )
   FetchContent_MakeAvailable(tinygltf)
+
+  FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG docking
+  )
+  FetchContent_MakeAvailable(imgui)
 endif()
 
 if(TARGET glfw)
@@ -72,6 +79,36 @@ elseif(TARGET glm)
   set(ABSTRACTO_GLM_TARGET glm)
 else()
   message(FATAL_ERROR "GLM not found. Install it or set ABSTRACTO_FETCH_DEPS=ON.")
+endif()
+
+if(DEFINED imgui_SOURCE_DIR)
+  add_library(
+    imgui
+    STATIC
+      ${imgui_SOURCE_DIR}/imgui.cpp
+      ${imgui_SOURCE_DIR}/imgui_demo.cpp
+      ${imgui_SOURCE_DIR}/imgui_draw.cpp
+      ${imgui_SOURCE_DIR}/imgui_tables.cpp
+      ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+      ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+      ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+  )
+
+  target_include_directories(
+    imgui
+    PUBLIC
+      ${imgui_SOURCE_DIR}
+      ${imgui_SOURCE_DIR}/backends
+  )
+
+  target_link_libraries(
+    imgui
+    PUBLIC
+      Vulkan::Vulkan
+      ${ABSTRACTO_GLFW_TARGET}
+  )
+else()
+  message(FATAL_ERROR "ImGui source not found. Install it or set ABSTRACTO_FETCH_DEPS=ON.")
 endif()
 
 add_executable(
@@ -140,6 +177,7 @@ target_link_libraries(
     Vulkan::Vulkan
     ${ABSTRACTO_GLFW_TARGET}
     ${ABSTRACTO_GLM_TARGET}
+    imgui
 )
 
 target_include_directories(

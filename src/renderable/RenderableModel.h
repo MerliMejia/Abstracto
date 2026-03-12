@@ -101,7 +101,7 @@ public:
     if (submeshes.empty()) {
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
-          .descriptorBindings = &materials.bindingsForMaterialIndex(-1),
+          .descriptorBindings = &materialSet.bindingsForMaterialIndex(-1),
           .targetPass = targetPass,
       });
       return items;
@@ -111,7 +111,7 @@ public:
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
           .descriptorBindings =
-              &materials.bindingsForMaterialIndex(submesh.materialIndex),
+              &materialSet.bindingsForMaterialIndex(submesh.materialIndex),
           .targetPass = targetPass,
           .indexOffset = submesh.indexOffset,
           .indexCount = submesh.indexCount,
@@ -119,6 +119,27 @@ public:
     }
 
     return items;
+  }
+
+  std::vector<ModelMaterialData> &mutableMaterials() {
+    if (asset == nullptr) {
+      throw std::runtime_error("RenderableModel has no loaded asset");
+    }
+    return asset->mutableMaterials();
+  }
+
+  const std::vector<ModelMaterialData> &materials() const {
+    if (asset == nullptr) {
+      throw std::runtime_error("RenderableModel has no loaded asset");
+    }
+    return asset->materials();
+  }
+
+  void syncMaterialParameters() {
+    if (asset == nullptr) {
+      throw std::runtime_error("RenderableModel has no loaded asset");
+    }
+    materialSet.updateMaterialParameters(asset->materials());
   }
 
   const ModelAsset *modelAsset() const { return asset.get(); }
@@ -147,12 +168,12 @@ private:
     if (materialOverride) {
       materialOverride(loadedAsset->mutableMaterials());
     }
-    materials.create(deviceContext, commandContext, descriptorSetLayout,
-                     frameUniforms, sampler, loadedAsset->materials(),
-                     framesInFlight);
+    materialSet.create(deviceContext, commandContext, descriptorSetLayout,
+                       frameUniforms, sampler, loadedAsset->materials(),
+                       framesInFlight);
     asset = std::move(loadedAsset);
   }
 
   std::unique_ptr<ModelAsset> asset;
-  ModelMaterialSet materials;
+  ModelMaterialSet materialSet;
 };

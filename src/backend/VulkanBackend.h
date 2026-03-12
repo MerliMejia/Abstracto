@@ -104,6 +104,8 @@ public:
   SwapchainContext &swapchain() { return swapchainContext; }
   CommandContext &commands() { return commandContext; }
   FrameSync &sync() { return frameSync; }
+  InstanceContext &instance() { return instanceContext; }
+  SurfaceContext &surface() { return surfaceContext; }
 
 private:
   BackendConfig config;

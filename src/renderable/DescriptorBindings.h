@@ -137,6 +137,14 @@ public:
     }
   }
 
+  void updateMaterialUniform(const MaterialUniformData &materialUniform) {
+    if (materialBufferMapped == nullptr) {
+      return;
+    }
+    std::memcpy(materialBufferMapped, &materialUniform,
+                sizeof(MaterialUniformData));
+  }
+
   vk::raii::DescriptorSet &descriptorSet(uint32_t frameIndex) {
     return descriptorSets[frameIndex];
   }
@@ -150,13 +158,15 @@ private:
                                   vk::MemoryPropertyFlagBits::eHostCoherent,
                               materialBuffer, materialBufferMemory);
 
-    void *mapped = materialBufferMemory.mapMemory(0, sizeof(MaterialUniformData));
-    std::memcpy(mapped, &materialUniform, sizeof(MaterialUniformData));
-    materialBufferMemory.unmapMemory();
+    materialBufferMapped =
+        materialBufferMemory.mapMemory(0, sizeof(MaterialUniformData));
+    std::memcpy(materialBufferMapped, &materialUniform,
+                sizeof(MaterialUniformData));
   }
 
   vk::raii::Buffer materialBuffer = nullptr;
   vk::raii::DeviceMemory materialBufferMemory = nullptr;
+  void *materialBufferMapped = nullptr;
   vk::raii::DescriptorPool descriptorPool = nullptr;
   std::vector<vk::raii::DescriptorSet> descriptorSets;
 };
