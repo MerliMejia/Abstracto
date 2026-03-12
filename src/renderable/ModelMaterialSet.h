@@ -14,7 +14,7 @@ public:
   void create(DeviceContext &deviceContext, CommandContext &commandContext,
               const vk::raii::DescriptorSetLayout &descriptorSetLayout,
               FrameUniforms &frameUniforms, Sampler &sampler,
-              const std::vector<ObjMaterialData> &materials,
+              const std::vector<ModelMaterialData> &materials,
               uint32_t framesInFlight) {
     defaultMaterialResource = MaterialResource{};
     materialResources.clear();
@@ -56,22 +56,27 @@ private:
     return {toByte(color.r), toByte(color.g), toByte(color.b), toByte(color.a)};
   }
 
-  static bool hasAvailableDiffuseTexture(const ObjMaterialData &material) {
-    return material.hasDiffuseTexture() &&
-           std::filesystem::exists(material.resolvedDiffuseTexturePath);
+  static bool hasAvailableBaseColorTexture(const ModelMaterialData &material) {
+    return material.hasBaseColorTexturePath() &&
+           std::filesystem::exists(material.resolvedBaseColorTexturePath);
   }
 
   void initializeResource(
-      MaterialResource &resource, const ObjMaterialData *material,
+      MaterialResource &resource, const ModelMaterialData *material,
       DeviceContext &deviceContext, CommandContext &commandContext,
       const vk::raii::DescriptorSetLayout &descriptorSetLayout,
       FrameUniforms &frameUniforms, Sampler &sampler, uint32_t framesInFlight) {
     const glm::vec4 fallbackColor =
-        material == nullptr ? glm::vec4(1.0f) : material->diffuseRgba();
+        material == nullptr ? glm::vec4(1.0f) : material->baseColorRgba();
 
-    if (material != nullptr && hasAvailableDiffuseTexture(*material)) {
-      resource.texture.create(material->resolvedDiffuseTexturePath,
+    if (material != nullptr && hasAvailableBaseColorTexture(*material)) {
+      resource.texture.create(material->resolvedBaseColorTexturePath,
                               commandContext, deviceContext);
+    } else if (material != nullptr && material->hasEmbeddedBaseColorTexture()) {
+      resource.texture.createRgba(material->baseColorTextureRgba.data(),
+                                  material->baseColorTextureWidth,
+                                  material->baseColorTextureHeight,
+                                  commandContext, deviceContext);
     } else {
       resource.texture.createSolidColor(toRgba8(fallbackColor), commandContext,
                                         deviceContext);

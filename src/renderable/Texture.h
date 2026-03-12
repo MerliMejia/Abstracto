@@ -12,7 +12,6 @@
 import vulkan_hpp;
 #endif
 
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #include "../renderer/SampledImageResource.h"
@@ -39,6 +38,16 @@ public:
                         CommandContext &commandContext,
                         DeviceContext &deviceContext) {
     createFromPixels(rgba.data(), 1, 1, commandContext, deviceContext);
+  }
+
+  void createRgba(const uint8_t *rgbaPixels, int width, int height,
+                  CommandContext &commandContext,
+                  DeviceContext &deviceContext) {
+    if (rgbaPixels == nullptr || width <= 0 || height <= 0) {
+      throw std::runtime_error("invalid RGBA texture data");
+    }
+
+    createFromPixels(rgbaPixels, width, height, commandContext, deviceContext);
   }
 
   vk::raii::ImageView &imageView() { return textureImageView; }

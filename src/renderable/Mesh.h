@@ -24,7 +24,6 @@ import vulkan_hpp;
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
 
-#define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 struct Vertex {
@@ -61,24 +60,50 @@ template <> struct std::hash<Vertex> {
   }
 };
 
-struct ObjMaterialData {
+struct ModelMaterialData {
+  std::string name;
+  glm::vec4 baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
+  std::string resolvedBaseColorTexturePath;
+  std::vector<uint8_t> baseColorTextureRgba;
+  int baseColorTextureWidth = 0;
+  int baseColorTextureHeight = 0;
+  float metallicFactor = 0.0f;
+  float roughnessFactor = 1.0f;
+  glm::vec3 emissiveFactor = {0.0f, 0.0f, 0.0f};
   tinyobj::material_t raw{};
-  std::string resolvedDiffuseTexturePath;
+  bool hasObjMaterial = false;
 
-  glm::vec4 diffuseRgba() const {
-    return {raw.diffuse[0], raw.diffuse[1], raw.diffuse[2], raw.dissolve};
+  glm::vec4 baseColorRgba() const { return baseColorFactor; }
+
+  bool hasBaseColorTexture() const {
+    return !resolvedBaseColorTexturePath.empty() ||
+           hasEmbeddedBaseColorTexture();
   }
 
-  bool hasDiffuseTexture() const { return !resolvedDiffuseTexturePath.empty(); }
+  bool hasEmbeddedBaseColorTexture() const {
+    return !baseColorTextureRgba.empty() && baseColorTextureWidth > 0 &&
+           baseColorTextureHeight > 0;
+  }
+
+  bool hasBaseColorTexturePath() const {
+    return !resolvedBaseColorTexturePath.empty();
+  }
+
+  glm::vec4 diffuseRgba() const { return baseColorRgba(); }
+  bool hasDiffuseTexture() const { return hasBaseColorTexture(); }
 };
 
-struct ObjSubmesh {
+using ObjMaterialData = ModelMaterialData;
+
+struct ModelSubmesh {
   std::string name;
   uint32_t indexOffset = 0;
   uint32_t indexCount = 0;
   int materialIndex = -1;
   uint32_t shapeIndex = 0;
 };
+
+using ObjSubmesh = ModelSubmesh;
 
 class Mesh {
 public:
@@ -153,10 +178,10 @@ public:
   vk::raii::Buffer &getIndexBuffer() { return indexBuffer; }
   std::vector<uint32_t> &getIndices() { return indices; }
   const std::vector<uint32_t> &getIndices() const { return indices; }
-  const std::vector<ObjMaterialData> &getMaterials() const {
-    return objMaterials;
+  const std::vector<ModelMaterialData> &getMaterials() const {
+    return materials;
   }
-  const std::vector<ObjSubmesh> &getSubmeshes() const { return objSubmeshes; }
+  const std::vector<ModelSubmesh> &getSubmeshes() const { return submeshes; }
   size_t vertexCount() const { return vertexCountValue; }
   size_t vertexStride() const { return vertexStrideValue; }
 
@@ -179,23 +204,23 @@ protected:
   void clearGeometry() {
     vertexBytes.clear();
     indices.clear();
-    objMaterials.clear();
-    objSubmeshes.clear();
+    materials.clear();
+    submeshes.clear();
     vertexStrideValue = 0;
     vertexCountValue = 0;
   }
 
-  void setObjMetadata(std::vector<ObjSubmesh> submeshes,
-                      std::vector<ObjMaterialData> materials) {
-    objSubmeshes = std::move(submeshes);
-    objMaterials = std::move(materials);
+  void setModelMetadata(std::vector<ModelSubmesh> meshSubmeshes,
+                        std::vector<ModelMaterialData> meshMaterials) {
+    submeshes = std::move(meshSubmeshes);
+    materials = std::move(meshMaterials);
   }
 
 private:
   std::vector<std::byte> vertexBytes;
   std::vector<uint32_t> indices;
-  std::vector<ObjMaterialData> objMaterials;
-  std::vector<ObjSubmesh> objSubmeshes;
+  std::vector<ModelMaterialData> materials;
+  std::vector<ModelSubmesh> submeshes;
   size_t vertexStrideValue = 0;
   size_t vertexCountValue = 0;
   vk::raii::Buffer vertexBuffer = nullptr;
@@ -248,17 +273,25 @@ inline std::string resolveObjAssetPath(const std::filesystem::path &objPath,
   return (objPath.parent_path() / path).lexically_normal().string();
 }
 
-inline std::vector<ObjMaterialData>
+inline std::vector<ModelMaterialData>
 buildObjMaterials(const ObjData &objData,
                   const std::filesystem::path &objPath) {
-  std::vector<ObjMaterialData> materials;
+  std::vector<ModelMaterialData> materials;
   materials.reserve(objData.materials.size());
 
   for (const auto &material : objData.materials) {
-    materials.push_back(ObjMaterialData{
-        .raw = material,
-        .resolvedDiffuseTexturePath =
+    materials.push_back(ModelMaterialData{
+        .name = material.name,
+        .baseColorFactor = {material.diffuse[0], material.diffuse[1],
+                            material.diffuse[2], material.dissolve},
+        .resolvedBaseColorTexturePath =
             resolveObjAssetPath(objPath, material.diffuse_texname),
+        .metallicFactor = 0.0f,
+        .roughnessFactor = 1.0f,
+        .emissiveFactor = {material.emission[0], material.emission[1],
+                           material.emission[2]},
+        .raw = material,
+        .hasObjMaterial = true,
     });
   }
 
@@ -347,8 +380,8 @@ inline ObjData loadObjData(const std::string &path) {
 template <typename TVertex> struct BuiltObjMeshData {
   std::vector<TVertex> vertices;
   std::vector<uint32_t> indices;
-  std::vector<ObjSubmesh> submeshes;
-  std::vector<ObjMaterialData> materials;
+  std::vector<ModelSubmesh> submeshes;
+  std::vector<ModelMaterialData> materials;
 };
 
 template <typename TVertex, typename TVertexFactory>
@@ -455,7 +488,7 @@ public:
                                            };
                                          });
     setGeometry(std::move(mesh.vertices), std::move(mesh.indices));
-    setObjMetadata(std::move(mesh.submeshes), std::move(mesh.materials));
+    setModelMetadata(std::move(mesh.submeshes), std::move(mesh.materials));
   }
 };
 
@@ -497,6 +530,17 @@ template <> struct std::hash<GeometryVertex> {
   }
 };
 
+class ImportedGeometryMesh : public TypedMesh<GeometryVertex> {
+public:
+  void setImportedGeometry(std::vector<GeometryVertex> meshVertices,
+                           std::vector<uint32_t> meshIndices,
+                           std::vector<ModelSubmesh> meshSubmeshes,
+                           std::vector<ModelMaterialData> meshMaterials) {
+    setGeometry(std::move(meshVertices), std::move(meshIndices));
+    setModelMetadata(std::move(meshSubmeshes), std::move(meshMaterials));
+  }
+};
+
 struct FullscreenVertex {
   glm::vec3 pos;
   glm::vec2 uv;
@@ -516,7 +560,7 @@ struct FullscreenVertex {
   }
 };
 
-class ObjGeometryMesh : public TypedMesh<GeometryVertex> {
+class ObjGeometryMesh : public ImportedGeometryMesh {
 public:
   void loadModel(const std::string &path) {
     auto objData = loadObjData(path);
@@ -533,8 +577,8 @@ public:
               .pos = v.position(), .normal = n, .texCoord = v.texCoord()};
         });
 
-    setGeometry(std::move(mesh.vertices), std::move(mesh.indices));
-    setObjMetadata(std::move(mesh.submeshes), std::move(mesh.materials));
+    setImportedGeometry(std::move(mesh.vertices), std::move(mesh.indices),
+                        std::move(mesh.submeshes), std::move(mesh.materials));
   }
 };
 

@@ -94,7 +94,8 @@ private:
     renderer.addPass(std::move(lightPassLocal));
 
     auto debugPassLocal = std::make_unique<DebugPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
+        PipelineSpec{.shaderPath =
+                         ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
                      .enableDepthTest = false,
                      .enableDepthWrite = false},
         MAX_FRAMES_IN_FLIGHT, geometryPassPtr, lightPass);
@@ -105,10 +106,10 @@ private:
     renderer.initialize(deviceContext(), swapchainContext());
 
     frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.loadFromObj(ASSET_PATH + "/models/plant_on_table.obj",
-                           commandContext(), deviceContext(),
-                           renderer.descriptorSetLayout(), frameUniforms,
-                           sampler, MAX_FRAMES_IN_FLIGHT);
+    sceneModel.loadFromFile(ASSET_PATH + "/models/toy_car.glb",
+                            commandContext(), deviceContext(),
+                            renderer.descriptorSetLayout(), frameUniforms,
+                            sampler, MAX_FRAMES_IN_FLIGHT);
 
     renderItems = sceneModel.buildRenderItems(geometryPassPtr);
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
@@ -201,7 +202,11 @@ private:
 
     UniformBufferObject ubo{};
 
-    ubo.model = glm::mat4(1.0f);
+    ubo.model = glm::scale(glm::mat4(1.0f), glm::vec3(40.0f));
+    ubo.model = glm::rotate(ubo.model, glm::radians(-90.0f),
+                            glm::vec3(1.0f, 0.0f, 0.0f));
+    ubo.model = glm::rotate(ubo.model, glm::radians(180.0f),
+                            glm::vec3(0.0f, 0.0f, 1.0f));
 
     ubo.view =
         glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),

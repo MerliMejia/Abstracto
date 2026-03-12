@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile_commands.json" FORCE)
 
-option(ABSTRACTO_FETCH_DEPS "Fetch GLFW/GLM/STB/TinyObjLoader when missing" ON)
+option(ABSTRACTO_FETCH_DEPS "Fetch GLFW/GLM/STB/TinyObjLoader/TinyGLTF when missing" ON)
 
 find_package(Vulkan REQUIRED)
 
@@ -49,6 +49,13 @@ if(ABSTRACTO_FETCH_DEPS)
     GIT_TAG v2.0.0rc13
   )
   FetchContent_MakeAvailable(tinyobjloader)
+
+  FetchContent_Declare(
+    tinygltf
+    GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
+    GIT_TAG v2.9.5
+  )
+  FetchContent_MakeAvailable(tinygltf)
 endif()
 
 if(TARGET glfw)
@@ -67,7 +74,13 @@ else()
   message(FATAL_ERROR "GLM not found. Install it or set ABSTRACTO_FETCH_DEPS=ON.")
 endif()
 
-add_executable(Abstracto src/main.cpp)
+add_executable(
+  Abstracto
+  src/main.cpp
+  src/renderable/GltfModelAsset.cpp
+  src/renderable/StbImageImplementation.cpp
+  src/renderable/TinyObjLoaderImplementation.cpp
+)
 
 target_compile_definitions(
   Abstracto
@@ -152,4 +165,14 @@ else()
     message(FATAL_ERROR "tiny_obj_loader.h not found. Install tinyobjloader or set ABSTRACTO_FETCH_DEPS=ON.")
   endif()
   target_include_directories(Abstracto PRIVATE ${TINYOBJLOADER_INCLUDE_DIR})
+endif()
+
+if(DEFINED tinygltf_SOURCE_DIR)
+  target_include_directories(Abstracto PRIVATE ${tinygltf_SOURCE_DIR})
+else()
+  find_path(TINYGLTF_INCLUDE_DIR tiny_gltf.h)
+  if(NOT TINYGLTF_INCLUDE_DIR)
+    message(FATAL_ERROR "tiny_gltf.h not found. Install tinygltf or set ABSTRACTO_FETCH_DEPS=ON.")
+  endif()
+  target_include_directories(Abstracto PRIVATE ${TINYGLTF_INCLUDE_DIR})
 endif()

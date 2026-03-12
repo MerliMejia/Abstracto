@@ -1,8 +1,9 @@
 #pragma once
 
 #include "Mesh.h"
+#include "ModelAsset.h"
 
-class ObjModelAsset {
+class ObjModelAsset : public ModelAsset {
 public:
   void load(const std::string &path) {
     sourcePath = path;
@@ -15,18 +16,18 @@ public:
     geometryMesh.createIndexBuffer(commandContext, deviceContext);
   }
 
-  ObjGeometryMesh &mesh() { return geometryMesh; }
-  const ObjGeometryMesh &mesh() const { return geometryMesh; }
+  ImportedGeometryMesh &mesh() override { return geometryMesh; }
+  const ImportedGeometryMesh &mesh() const override { return geometryMesh; }
 
-  const std::vector<ObjMaterialData> &materials() const {
+  const std::vector<ModelMaterialData> &materials() const override {
     return geometryMesh.getMaterials();
   }
 
-  const std::vector<ObjSubmesh> &submeshes() const {
+  const std::vector<ModelSubmesh> &submeshes() const override {
     return geometryMesh.getSubmeshes();
   }
 
-  const std::string &path() const { return sourcePath; }
+  const std::string &path() const override { return sourcePath; }
 
 private:
   std::string sourcePath;
