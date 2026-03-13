@@ -21,8 +21,10 @@ float LinearizeDepth(float depth, float nearPlane, float farPlane) {
 [[vk::binding(0, 0)]] Sampler2D gbufferAlbedo;
 [[vk::binding(1, 0)]] Sampler2D gbufferNormal;
 [[vk::binding(2, 0)]] Sampler2D gbufferMaterial;
-[[vk::binding(3, 0)]] Sampler2D gbufferDepth;
-[[vk::binding(4, 0)]] Sampler2D shadedPassColor;
+[[vk::binding(3, 0)]] Sampler2D gbufferEmissive;
+[[vk::binding(4, 0)]] Sampler2D gbufferDepth;
+[[vk::binding(5, 0)]] Sampler2D lightPassColor;
+[[vk::binding(6, 0)]] Sampler2D tonemapPassColor;
 
 [[vk::push_constant]]
 ConstantBuffer<DebugPushConstant> debugPush;
@@ -50,11 +52,35 @@ float4 fragMain(VSOutput input) : SV_TARGET {
     }
 
     if (debugPush.selectedOutput == 3) {
+        return gbufferEmissive.Sample(input.uv);
+    }
+
+    if (debugPush.selectedOutput == 4) {
         float depth = gbufferDepth.Sample(input.uv).r;
         float linearDepth = LinearizeDepth(depth, 0.1, 10.0);
         float normalized = saturate(linearDepth / 10.0);
         return float4(normalized.xxx, 1.0);
     }
 
-    return shadedPassColor.Sample(input.uv);
+    if (debugPush.selectedOutput == 5) {
+        float2 tiledUv = frac(input.uv * 2.0);
+
+        if (input.uv.x < 0.5 && input.uv.y < 0.5) {
+            return gbufferAlbedo.Sample(tiledUv);
+        }
+        if (input.uv.x >= 0.5 && input.uv.y < 0.5) {
+            return float4(gbufferNormal.Sample(tiledUv).rgb, 1.0);
+        }
+        if (input.uv.x < 0.5 && input.uv.y >= 0.5) {
+            return gbufferMaterial.Sample(tiledUv);
+        }
+        return gbufferEmissive.Sample(tiledUv);
+    }
+
+    if (debugPush.selectedOutput == 6) {
+        float3 hdr = lightPassColor.Sample(input.uv).rgb;
+        return float4(hdr / (1.0 + hdr), 1.0);
+    }
+
+    return tonemapPassColor.Sample(input.uv);
 }

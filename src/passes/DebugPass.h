@@ -14,7 +14,8 @@ class DebugPass : public FullscreenRenderPass {
 public:
   DebugPass(PipelineSpec spec, uint32_t framesInFlight,
             const GeometryPass *sourcePass = nullptr,
-            const RasterRenderPass *finalPass = nullptr)
+            const RasterRenderPass *lightPass = nullptr,
+            const RasterRenderPass *tonemapPass = nullptr)
       : FullscreenRenderPass(std::move(spec), framesInFlight,
                              RasterPassAttachmentConfig{
                                  .useColorAttachment = true,
@@ -23,14 +24,19 @@ public:
                                  .resolveToSwapchain = false,
                                  .useSwapchainColorAttachment = true,
                              }),
-        sourcePassRef(sourcePass), finalPassRef(finalPass) {}
+        sourcePassRef(sourcePass), lightPassRef(lightPass),
+        tonemapPassRef(tonemapPass) {}
 
   void setSourcePass(const GeometryPass &sourcePass) {
     sourcePassRef = &sourcePass;
   }
 
-  void setFinalPass(const RasterRenderPass &finalPass) {
-    finalPassRef = &finalPass;
+  void setLightPass(const RasterRenderPass &lightPass) {
+    lightPassRef = &lightPass;
+  }
+
+  void setTonemapPass(const RasterRenderPass &tonemapPass) {
+    tonemapPassRef = &tonemapPass;
   }
 
   void setSelectedOutput(uint32_t index) { selectedOutput = index; }
@@ -43,6 +49,8 @@ protected:
         {.binding = 2},
         {.binding = 3},
         {.binding = 4},
+        {.binding = 5},
+        {.binding = 6},
     };
   }
 
@@ -75,8 +83,11 @@ protected:
          .resource = sourcePassRef->sampledColorOutput(1, sampler)},
         {.binding = 2,
          .resource = sourcePassRef->sampledColorOutput(2, sampler)},
-        {.binding = 3, .resource = sourcePassRef->sampledDepthOutput(sampler)},
-        {.binding = 4, .resource = finalPassRef->sampledColorOutput(sampler)},
+        {.binding = 3,
+         .resource = sourcePassRef->sampledColorOutput(3, sampler)},
+        {.binding = 4, .resource = sourcePassRef->sampledDepthOutput(sampler)},
+        {.binding = 5, .resource = lightPassRef->sampledColorOutput(sampler)},
+        {.binding = 6, .resource = tonemapPassRef->sampledColorOutput(sampler)},
     };
   }
 
@@ -90,15 +101,19 @@ protected:
 
 private:
   const GeometryPass *sourcePassRef = nullptr;
-  const RasterRenderPass *finalPassRef = nullptr;
+  const RasterRenderPass *lightPassRef = nullptr;
+  const RasterRenderPass *tonemapPassRef = nullptr;
   uint32_t selectedOutput = 0;
 
   void validateSourcePass() const {
     if (sourcePassRef == nullptr) {
       throw std::runtime_error("DebugPass requires a GeometryPass source");
     }
-    if (finalPassRef == nullptr) {
-      throw std::runtime_error("DebugPass requires a shaded source pass");
+    if (lightPassRef == nullptr) {
+      throw std::runtime_error("DebugPass requires a light source pass");
+    }
+    if (tonemapPassRef == nullptr) {
+      throw std::runtime_error("DebugPass requires a tonemap source pass");
     }
   }
 };

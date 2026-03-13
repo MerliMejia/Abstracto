@@ -22,6 +22,8 @@ public:
                                  .useMsaaColorAttachment = false,
                                  .resolveToSwapchain = false,
                                  .useSwapchainColorAttachment = false,
+                                 .offscreenColorFormat =
+                                     vk::Format::eR16G16B16A16Sfloat,
                                  .sampleColorAttachment = true,
                              }),
         sourcePassRef(sourcePass) {}

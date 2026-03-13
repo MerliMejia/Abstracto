@@ -5,6 +5,7 @@
 #include "passes/GeometryPass.h"
 #include "passes/ImGuiPass.h"
 #include "passes/PbrPass.h"
+#include "passes/TonemapPass.h"
 #include "renderable/FrameUniforms.h"
 #include "renderable/RenderableModel.h"
 #include "renderable/Sampler.h"
@@ -29,11 +30,14 @@ constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
 const std::string ASSET_PATH = "assets";
 
 enum class PresentedOutput : uint32_t {
-  Albedo = 0,
-  Normal = 1,
-  Material = 2,
-  Depth = 3,
-  Light = 4,
+  GBufferAlbedo = 0,
+  GBufferNormal = 1,
+  GBufferMaterial = 2,
+  GBufferEmissive = 3,
+  GBufferDepth = 4,
+  GeometryPass = 5,
+  LightPass = 6,
+  TonemapPass = 7,
 };
 
 std::string normalizedMaterialName(std::string_view name) {
@@ -75,6 +79,7 @@ private:
   FrameUniforms frameUniforms;
   Sampler sampler;
   PbrPass *pbrPass = nullptr;
+  TonemapPass *tonemapPass = nullptr;
   DebugPass *debugPass = nullptr;
   ImGuiPass *imguiPass = nullptr;
   std::chrono::steady_clock::time_point lastFrameTime =
@@ -83,7 +88,13 @@ private:
   float lightElevationRadians = glm::radians(-35.264f);
   float lightIntensity = 1.0f;
   glm::vec3 lightColor = {1.0f, 0.95f, 0.9f};
-  PresentedOutput presentedOutput = PresentedOutput::Light;
+  float exposure = 1.0f;
+  float autoExposureKey = 1.0f;
+  float whitePoint = 4.0f;
+  float gamma = 2.2f;
+  bool autoExposureEnabled = false;
+  TonemapOperator tonemapOperator = TonemapOperator::ACES;
+  PresentedOutput presentedOutput = PresentedOutput::TonemapPass;
   int selectedMaterialIndex = 0;
 
   void initWindow() { window.create(WIDTH, HEIGHT, "Double Pass"); }
@@ -112,12 +123,20 @@ private:
     pbrPass = pbrPassLocal.get();
     renderer.addPass(std::move(pbrPassLocal));
 
+    auto tonemapPassLocal = std::make_unique<TonemapPass>(
+        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/tonemap_pass.spv",
+                     .enableDepthTest = false,
+                     .enableDepthWrite = false},
+        MAX_FRAMES_IN_FLIGHT, pbrPass);
+    tonemapPass = tonemapPassLocal.get();
+    renderer.addPass(std::move(tonemapPassLocal));
+
     auto debugPassLocal = std::make_unique<DebugPass>(
         PipelineSpec{.shaderPath =
                          ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
                      .enableDepthTest = false,
                      .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass);
+        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass, tonemapPass);
     debugPass = debugPassLocal.get();
     debugPass->setSelectedOutput(static_cast<uint32_t>(presentedOutput));
     renderer.addPass(std::move(debugPassLocal));
@@ -130,7 +149,7 @@ private:
     renderer.initialize(deviceContext(), swapchainContext());
 
     frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.loadFromFile(ASSET_PATH + "/models/toy_car.glb",
+    sceneModel.loadFromFile(ASSET_PATH + "/models/chronograph_watch.glb",
                             commandContext(), deviceContext(),
                             renderer.descriptorSetLayout(), frameUniforms,
                             sampler, MAX_FRAMES_IN_FLIGHT);
@@ -139,6 +158,9 @@ private:
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
                                      .descriptorBindings = nullptr,
                                      .targetPass = pbrPass});
+    renderItems.push_back(RenderItem{.mesh = &lightQuad,
+                                     .descriptorBindings = nullptr,
+                                     .targetPass = tonemapPass});
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
                                      .descriptorBindings = nullptr,
                                      .targetPass = debugPass});
@@ -228,6 +250,20 @@ private:
     }
     ImGui::SliderFloat("Intensity", &lightIntensity, 0.0f, 20.0f);
     ImGui::ColorEdit3("Color", &lightColor.x);
+    ImGui::SeparatorText("Tonemap");
+
+    int tonemapOperatorIndex = static_cast<int>(tonemapOperator);
+    ImGui::Combo("Operator", &tonemapOperatorIndex, "None\0Reinhard\0ACES\0");
+    tonemapOperator = static_cast<TonemapOperator>(tonemapOperatorIndex);
+
+    ImGui::Checkbox("Auto Exposure", &autoExposureEnabled);
+    if (autoExposureEnabled) {
+      ImGui::SliderFloat("Auto Key", &autoExposureKey, 0.1f, 2.5f);
+    } else {
+      ImGui::SliderFloat("Exposure", &exposure, 0.1f, 4.0f);
+    }
+    ImGui::SliderFloat("White Point", &whitePoint, 0.5f, 16.0f);
+    ImGui::SliderFloat("Gamma", &gamma, 1.0f, 3.0f);
     ImGui::Text("Direction: %.2f %.2f %.2f", currentLightDirectionWorld().x,
                 currentLightDirectionWorld().y, currentLightDirectionWorld().z);
     ImGui::End();
@@ -236,16 +272,26 @@ private:
   void buildDebugUi() {
     ImGui::Begin("View");
     int output = static_cast<int>(presentedOutput);
-    ImGui::RadioButton("Material", &output,
-                       static_cast<int>(PresentedOutput::Material));
+    ImGui::SeparatorText("GBuffers (Geometry Pass)");
     ImGui::RadioButton("Albedo", &output,
-                       static_cast<int>(PresentedOutput::Albedo));
-    ImGui::RadioButton("Depth", &output,
-                       static_cast<int>(PresentedOutput::Depth));
+                       static_cast<int>(PresentedOutput::GBufferAlbedo));
     ImGui::RadioButton("Normal", &output,
-                       static_cast<int>(PresentedOutput::Normal));
-    ImGui::RadioButton("Lit", &output,
-                       static_cast<int>(PresentedOutput::Light));
+                       static_cast<int>(PresentedOutput::GBufferNormal));
+    ImGui::RadioButton("Material", &output,
+                       static_cast<int>(PresentedOutput::GBufferMaterial));
+    ImGui::RadioButton("Emissive", &output,
+                       static_cast<int>(PresentedOutput::GBufferEmissive));
+    ImGui::RadioButton("Depth", &output,
+                       static_cast<int>(PresentedOutput::GBufferDepth));
+
+    ImGui::SeparatorText("Pass Outputs");
+    ImGui::RadioButton("Geometry Pass", &output,
+                       static_cast<int>(PresentedOutput::GeometryPass));
+    ImGui::RadioButton("Light Pass", &output,
+                       static_cast<int>(PresentedOutput::LightPass));
+    ImGui::RadioButton("Tone Mapping Pass", &output,
+                       static_cast<int>(PresentedOutput::TonemapPass));
+
     presentedOutput = static_cast<PresentedOutput>(output);
     if (debugPass != nullptr) {
       debugPass->setSelectedOutput(static_cast<uint32_t>(presentedOutput));
@@ -259,60 +305,6 @@ private:
         glm::vec3(cosElevation * std::cos(lightAzimuthRadians),
                   cosElevation * std::sin(lightAzimuthRadians),
                   std::sin(lightElevationRadians)));
-  }
-
-  void processLightControls(float deltaSeconds) {
-    const float orbitSpeed = glm::radians(90.0f);
-    const float intensitySpeed = 1.5f;
-
-    if (glfwGetKey(window.handle(), GLFW_KEY_LEFT) == GLFW_PRESS) {
-      lightAzimuthRadians -= orbitSpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_RIGHT) == GLFW_PRESS) {
-      lightAzimuthRadians += orbitSpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_UP) == GLFW_PRESS) {
-      lightElevationRadians += orbitSpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_DOWN) == GLFW_PRESS) {
-      lightElevationRadians -= orbitSpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_Q) == GLFW_PRESS) {
-      lightIntensity -= intensitySpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_E) == GLFW_PRESS) {
-      lightIntensity += intensitySpeed * deltaSeconds;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_R) == GLFW_PRESS) {
-      lightAzimuthRadians = glm::radians(225.0f);
-      lightElevationRadians = glm::radians(-35.264f);
-      lightIntensity = 1.0f;
-    }
-
-    lightElevationRadians = glm::clamp(
-        lightElevationRadians, glm::radians(-89.0f), glm::radians(89.0f));
-  }
-
-  void processDebugControls() {
-    if (glfwGetKey(window.handle(), GLFW_KEY_1) == GLFW_PRESS) {
-      presentedOutput = PresentedOutput::Material;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_2) == GLFW_PRESS) {
-      presentedOutput = PresentedOutput::Albedo;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_3) == GLFW_PRESS) {
-      presentedOutput = PresentedOutput::Depth;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_4) == GLFW_PRESS) {
-      presentedOutput = PresentedOutput::Normal;
-    }
-    if (glfwGetKey(window.handle(), GLFW_KEY_5) == GLFW_PRESS) {
-      presentedOutput = PresentedOutput::Light;
-    }
-
-    if (debugPass != nullptr) {
-      debugPass->setSelectedOutput(static_cast<uint32_t>(presentedOutput));
-    }
   }
 
   void drawFrame() {
@@ -329,9 +321,6 @@ private:
         std::chrono::duration<float>(now - lastFrameTime).count(), 0.1f);
     lastFrameTime = now;
 
-    processLightControls(deltaSeconds);
-    processDebugControls();
-
     if (imguiPass != nullptr) {
       imguiPass->beginFrame();
       const bool materialChanged = buildMaterialEditorUi();
@@ -345,11 +334,8 @@ private:
 
     UniformBufferObject ubo{};
 
-    ubo.model = glm::scale(glm::mat4(1.0f), glm::vec3(40.0f));
-    ubo.model = glm::rotate(ubo.model, glm::radians(-90.0f),
-                            glm::vec3(1.0f, 0.0f, 0.0f));
-    ubo.model = glm::rotate(ubo.model, glm::radians(180.0f),
-                            glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.model = glm::mat4(1.0f);
+    ubo.model = glm::scale(ubo.model, glm::vec3(0.3f));
 
     ubo.view =
         glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
@@ -374,6 +360,20 @@ private:
       pbrPass->setProjection(ubo.proj);
       pbrPass->setDirectionalLight(lightDirectionView,
                                    lightColor * lightIntensity);
+    }
+    if (tonemapPass != nullptr) {
+      const glm::vec3 lightRadiance = lightColor * lightIntensity;
+      const float lightLuminance =
+          glm::dot(lightRadiance, glm::vec3(0.2126f, 0.7152f, 0.0722f));
+      const float resolvedExposure =
+          autoExposureEnabled
+              ? glm::clamp(autoExposureKey / std::max(lightLuminance, 0.001f),
+                           0.05f, 8.0f)
+              : exposure;
+      tonemapPass->setExposure(resolvedExposure);
+      tonemapPass->setWhitePoint(whitePoint);
+      tonemapPass->setGamma(gamma);
+      tonemapPass->setOperator(tonemapOperator);
     }
 
     renderer.record(backend.commands().commandBuffer(frameState->frameIndex),
