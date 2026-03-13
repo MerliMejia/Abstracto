@@ -9,14 +9,14 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 
-struct UniformBufferObject {
+struct GeometryUniformData {
   alignas(16) glm::mat4 model;
   alignas(16) glm::mat4 modelNormal;
   alignas(16) glm::mat4 view;
   alignas(16) glm::mat4 proj;
 };
 
-class FrameUniforms {
+class FrameGeometryUniforms {
 public:
   void create(DeviceContext &deviceContext, uint32_t framesInFlight) {
     uniformBuffers.clear();
@@ -24,7 +24,7 @@ public:
     uniformBuffersMapped.clear();
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-      vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+      vk::DeviceSize bufferSize = sizeof(GeometryUniformData);
       vk::raii::Buffer buffer({});
       vk::raii::DeviceMemory bufferMemory({});
       RenderUtils::createBuffer(deviceContext, bufferSize,
@@ -39,8 +39,9 @@ public:
     }
   }
 
-  void write(uint32_t frameIndex, const UniformBufferObject &ubo) {
-    std::memcpy(uniformBuffersMapped[frameIndex], &ubo, sizeof(ubo));
+  void write(uint32_t frameIndex, const GeometryUniformData &uniformData) {
+    std::memcpy(uniformBuffersMapped[frameIndex], &uniformData,
+                sizeof(uniformData));
   }
 
   vk::raii::Buffer &buffer(uint32_t frameIndex) {

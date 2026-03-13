@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../renderer/RenderPass.h"
-#include "FrameUniforms.h"
+#include "FrameGeometryUniforms.h"
 #include "GltfModelAsset.h"
 #include "ModelAsset.h"
 #include "ModelMaterialSet.h"
@@ -21,69 +21,77 @@ public:
   void loadFromObj(const std::string &path, CommandContext &commandContext,
                    DeviceContext &deviceContext,
                    const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                   FrameUniforms &frameUniforms, Sampler &sampler,
+                   FrameGeometryUniforms &frameGeometryUniforms,
+                   Sampler &sampler,
                    uint32_t framesInFlight) {
     loadFromObj(path, commandContext, deviceContext, descriptorSetLayout,
-                frameUniforms, sampler, framesInFlight, nullptr);
+                frameGeometryUniforms, sampler, framesInFlight, nullptr);
   }
 
   void loadFromObj(const std::string &path, CommandContext &commandContext,
                    DeviceContext &deviceContext,
                    const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                   FrameUniforms &frameUniforms, Sampler &sampler,
+                   FrameGeometryUniforms &frameGeometryUniforms,
+                   Sampler &sampler,
                    uint32_t framesInFlight,
                    MaterialOverrideFn materialOverride) {
     loadAsset<ObjModelAsset>(path, commandContext, deviceContext,
-                             descriptorSetLayout, frameUniforms, sampler,
-                             framesInFlight, materialOverride);
+                             descriptorSetLayout, frameGeometryUniforms,
+                             sampler, framesInFlight, materialOverride);
   }
 
   void loadFromGltf(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                    FrameUniforms &frameUniforms, Sampler &sampler,
+                    FrameGeometryUniforms &frameGeometryUniforms,
+                    Sampler &sampler,
                     uint32_t framesInFlight) {
     loadFromGltf(path, commandContext, deviceContext, descriptorSetLayout,
-                 frameUniforms, sampler, framesInFlight, nullptr);
+                 frameGeometryUniforms, sampler, framesInFlight, nullptr);
   }
 
   void loadFromGltf(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                    FrameUniforms &frameUniforms, Sampler &sampler,
+                    FrameGeometryUniforms &frameGeometryUniforms,
+                    Sampler &sampler,
                     uint32_t framesInFlight,
                     MaterialOverrideFn materialOverride) {
     loadAsset<GltfModelAsset>(path, commandContext, deviceContext,
-                              descriptorSetLayout, frameUniforms, sampler,
-                              framesInFlight, materialOverride);
+                              descriptorSetLayout, frameGeometryUniforms,
+                              sampler, framesInFlight, materialOverride);
   }
 
   void loadFromFile(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                    FrameUniforms &frameUniforms, Sampler &sampler,
+                    FrameGeometryUniforms &frameGeometryUniforms,
+                    Sampler &sampler,
                     uint32_t framesInFlight) {
     loadFromFile(path, commandContext, deviceContext, descriptorSetLayout,
-                 frameUniforms, sampler, framesInFlight, nullptr);
+                 frameGeometryUniforms, sampler, framesInFlight, nullptr);
   }
 
   void loadFromFile(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                    FrameUniforms &frameUniforms, Sampler &sampler,
+                    FrameGeometryUniforms &frameGeometryUniforms,
+                    Sampler &sampler,
                     uint32_t framesInFlight,
                     MaterialOverrideFn materialOverride) {
     const std::string extension =
         std::filesystem::path(path).extension().string();
     if (extension == ".obj") {
       loadFromObj(path, commandContext, deviceContext, descriptorSetLayout,
-                  frameUniforms, sampler, framesInFlight, materialOverride);
+                  frameGeometryUniforms, sampler, framesInFlight,
+                  materialOverride);
       return;
     }
 
     if (extension == ".gltf" || extension == ".glb") {
       loadFromGltf(path, commandContext, deviceContext, descriptorSetLayout,
-                   frameUniforms, sampler, framesInFlight, materialOverride);
+                   frameGeometryUniforms, sampler, framesInFlight,
+                   materialOverride);
       return;
     }
 
@@ -154,17 +162,19 @@ private:
   void loadAsset(const std::string &path, CommandContext &commandContext,
                  DeviceContext &deviceContext,
                  const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                 FrameUniforms &frameUniforms, Sampler &sampler,
+                 FrameGeometryUniforms &frameGeometryUniforms,
+                 Sampler &sampler,
                  uint32_t framesInFlight) {
     loadAsset<TAsset>(path, commandContext, deviceContext, descriptorSetLayout,
-                      frameUniforms, sampler, framesInFlight, nullptr);
+                      frameGeometryUniforms, sampler, framesInFlight, nullptr);
   }
 
   template <typename TAsset>
   void loadAsset(const std::string &path, CommandContext &commandContext,
                  DeviceContext &deviceContext,
                  const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-                 FrameUniforms &frameUniforms, Sampler &sampler,
+                 FrameGeometryUniforms &frameGeometryUniforms,
+                 Sampler &sampler,
                  uint32_t framesInFlight,
                  const MaterialOverrideFn &materialOverride) {
     auto loadedAsset = std::make_unique<TAsset>();
@@ -177,7 +187,8 @@ private:
       materialOverride(loadedAsset->mutableMaterials());
     }
     materialSet.create(deviceContext, commandContext, descriptorSetLayout,
-                       frameUniforms, sampler, loadedAsset->materials(),
+                       frameGeometryUniforms, sampler,
+                       loadedAsset->materials(),
                        framesInFlight);
     asset = std::move(loadedAsset);
   }

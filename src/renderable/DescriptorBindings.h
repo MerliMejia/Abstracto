@@ -1,6 +1,6 @@
 #pragma once
 
-#include "FrameUniforms.h"
+#include "FrameGeometryUniforms.h"
 #include "RenderUtils.h"
 #include "Sampler.h"
 #include "Texture.h"
@@ -24,7 +24,8 @@ class DescriptorBindings {
 public:
   void create(DeviceContext &deviceContext,
               const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-              FrameUniforms &frameUniforms, Texture &baseColorTexture,
+              FrameGeometryUniforms &frameGeometryUniforms,
+              Texture &baseColorTexture,
               Texture &metallicRoughnessTexture, Texture &normalTexture,
               Texture &emissiveTexture, Texture &occlusionTexture,
               Sampler &sampler, const MaterialUniformData &materialUniform,
@@ -56,9 +57,10 @@ public:
         deviceContext.deviceHandle().allocateDescriptorSets(allocInfo);
 
     for (uint32_t i = 0; i < framesInFlight; i++) {
-      vk::DescriptorBufferInfo bufferInfo{.buffer = frameUniforms.buffer(i),
-                                          .offset = 0,
-                                          .range = sizeof(UniformBufferObject)};
+      vk::DescriptorBufferInfo bufferInfo{
+          .buffer = frameGeometryUniforms.buffer(i),
+          .offset = 0,
+          .range = sizeof(GeometryUniformData)};
       vk::DescriptorBufferInfo materialBufferInfo{
           .buffer = materialBuffer,
           .offset = 0,

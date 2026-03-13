@@ -6,7 +6,7 @@
 #include "passes/ImGuiPass.h"
 #include "passes/PbrPass.h"
 #include "passes/TonemapPass.h"
-#include "renderable/FrameUniforms.h"
+#include "renderable/FrameGeometryUniforms.h"
 #include "renderable/RenderableModel.h"
 #include "renderable/Sampler.h"
 #include "renderer/PassRenderer.h"
@@ -77,7 +77,7 @@ private:
 
   RenderableModel sceneModel;
   FullscreenMesh lightQuad;
-  FrameUniforms frameUniforms;
+  FrameGeometryUniforms frameGeometryUniforms;
   Sampler sampler;
   ImageBasedLightingResources iblResources;
   GeometryPass *geometryPass = nullptr;
@@ -168,8 +168,9 @@ private:
     backend.waitIdle();
     sceneModel.setSmoothGltfNormalsEnabled(smoothGltfNormalsEnabled);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(), frameUniforms,
-                            sampler, MAX_FRAMES_IN_FLIGHT);
+                            renderer.descriptorSetLayout(),
+                            frameGeometryUniforms, sampler,
+                            MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
   }
 
@@ -229,11 +230,12 @@ private:
 
     renderer.initialize(deviceContext(), swapchainContext());
 
-    frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
+    frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
     sceneModel.setSmoothGltfNormalsEnabled(smoothGltfNormalsEnabled);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(),
                             deviceContext(), renderer.descriptorSetLayout(),
-                            frameUniforms, sampler, MAX_FRAMES_IN_FLIGHT);
+                            frameGeometryUniforms, sampler,
+                            MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
   }
 
@@ -599,40 +601,48 @@ private:
 
     updateFreeCamera(deltaSeconds);
 
-    UniformBufferObject ubo{};
+    GeometryUniformData geometryUniformData{};
 
-    ubo.model = glm::mat4(1.0f);
-    ubo.model = glm::translate(ubo.model, modelPosition);
-    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.x),
-                            glm::vec3(1.0f, 0.0f, 0.0f));
-    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.y),
-                            glm::vec3(0.0f, 1.0f, 0.0f));
-    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.z),
-                            glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.model = glm::scale(ubo.model, modelScale);
-    ubo.modelNormal = glm::transpose(glm::inverse(ubo.model));
+    geometryUniformData.model = glm::mat4(1.0f);
+    geometryUniformData.model =
+        glm::translate(geometryUniformData.model, modelPosition);
+    geometryUniformData.model = glm::rotate(
+        geometryUniformData.model, glm::radians(modelRotationDegrees.x),
+        glm::vec3(1.0f, 0.0f, 0.0f));
+    geometryUniformData.model = glm::rotate(
+        geometryUniformData.model, glm::radians(modelRotationDegrees.y),
+        glm::vec3(0.0f, 1.0f, 0.0f));
+    geometryUniformData.model = glm::rotate(
+        geometryUniformData.model, glm::radians(modelRotationDegrees.z),
+        glm::vec3(0.0f, 0.0f, 1.0f));
+    geometryUniformData.model =
+        glm::scale(geometryUniformData.model, modelScale);
+    geometryUniformData.modelNormal =
+        glm::transpose(glm::inverse(geometryUniformData.model));
 
-    ubo.view =
+    geometryUniformData.view =
         glm::lookAt(cameraPosition, cameraPosition + currentCameraForward(),
                     glm::vec3(0.0f, 0.0f, 1.0f));
 
-    ubo.proj = glm::perspective(
+    geometryUniformData.proj = glm::perspective(
         glm::radians(45.0f),
         static_cast<float>(swapchainContext().extent2D().width) /
             static_cast<float>(swapchainContext().extent2D().height),
         0.1f, 10.0f);
 
     // Vulkan inverts Y.
-    ubo.proj[1][1] *= -1.0f;
+    geometryUniformData.proj[1][1] *= -1.0f;
 
-    frameUniforms.write(frameState->frameIndex, ubo);
+    frameGeometryUniforms.write(frameState->frameIndex, geometryUniformData);
 
     if (pbrPass != nullptr) {
       glm::vec3 lightDirectionWorld = currentLightDirectionWorld();
       glm::vec3 lightDirectionView =
-          glm::normalize(glm::mat3(ubo.view) * lightDirectionWorld);
+          glm::normalize(glm::mat3(geometryUniformData.view) *
+                         lightDirectionWorld);
 
-      pbrPass->setCamera(ubo.proj, ubo.view);
+      pbrPass->setCamera(geometryUniformData.proj,
+                         geometryUniformData.view);
       pbrPass->setDirectionalLight(lightDirectionView,
                                    lightColor * lightIntensity);
       pbrPass->setEnvironmentControls(

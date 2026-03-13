@@ -1,7 +1,7 @@
 #pragma once
 
 #include "DescriptorBindings.h"
-#include "FrameUniforms.h"
+#include "FrameGeometryUniforms.h"
 #include "Mesh.h"
 #include "Sampler.h"
 #include "Texture.h"
@@ -13,7 +13,7 @@ class ModelMaterialSet {
 public:
   void create(DeviceContext &deviceContext, CommandContext &commandContext,
               const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-              FrameUniforms &frameUniforms, Sampler &sampler,
+              FrameGeometryUniforms &frameGeometryUniforms, Sampler &sampler,
               const std::vector<ModelMaterialData> &materials,
               uint32_t framesInFlight) {
     defaultMaterialResource = MaterialResource{};
@@ -21,14 +21,14 @@ public:
     materialResources.reserve(materials.size());
 
     initializeResource(defaultMaterialResource, nullptr, deviceContext,
-                       commandContext, descriptorSetLayout, frameUniforms,
-                       sampler, framesInFlight);
+                       commandContext, descriptorSetLayout,
+                       frameGeometryUniforms, sampler, framesInFlight);
 
     for (const auto &material : materials) {
       materialResources.emplace_back();
       initializeResource(materialResources.back(), &material, deviceContext,
-                         commandContext, descriptorSetLayout, frameUniforms,
-                         sampler, framesInFlight);
+                         commandContext, descriptorSetLayout,
+                         frameGeometryUniforms, sampler, framesInFlight);
     }
   }
 
@@ -118,7 +118,8 @@ private:
       MaterialResource &resource, const ModelMaterialData *material,
       DeviceContext &deviceContext, CommandContext &commandContext,
       const vk::raii::DescriptorSetLayout &descriptorSetLayout,
-      FrameUniforms &frameUniforms, Sampler &sampler, uint32_t framesInFlight) {
+      FrameGeometryUniforms &frameGeometryUniforms, Sampler &sampler,
+      uint32_t framesInFlight) {
     const ModelMaterialData defaultMaterial{};
     const ModelMaterialData &resolvedMaterial =
         material == nullptr ? defaultMaterial : *material;
@@ -147,7 +148,7 @@ private:
     MaterialUniformData materialUniform = buildMaterialUniform(resolvedMaterial);
 
     resource.bindings.create(
-        deviceContext, descriptorSetLayout, frameUniforms,
+        deviceContext, descriptorSetLayout, frameGeometryUniforms,
         resource.baseColorTexture, resource.metallicRoughnessTexture,
         resource.normalTexture, resource.emissiveTexture,
         resource.occlusionTexture, sampler, materialUniform, framesInFlight);
