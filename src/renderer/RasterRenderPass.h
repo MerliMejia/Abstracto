@@ -503,7 +503,7 @@ private:
     }
 
     RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
-                             swapchainContext.extent2D().height, 1,
+                             swapchainContext.extent2D().height, 1, 1,
                              rasterizationSampleCount(deviceContext),
                              colorFormat, vk::ImageTiling::eOptimal, imageUsage,
                              vk::MemoryPropertyFlagBits::eDeviceLocal,
@@ -524,7 +524,7 @@ private:
     }
 
     RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
-                             swapchainContext.extent2D().height, 1,
+                             swapchainContext.extent2D().height, 1, 1,
                              rasterizationSampleCount(deviceContext),
                              depthFormat, vk::ImageTiling::eOptimal, usage,
                              vk::MemoryPropertyFlagBits::eDeviceLocal,

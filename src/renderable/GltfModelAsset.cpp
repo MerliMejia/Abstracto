@@ -326,6 +326,46 @@ std::string primitiveName(const tinygltf::Node &node,
   return "primitive_" + std::to_string(primitiveIndex);
 }
 
+void recomputeSmoothNormals(std::vector<GeometryVertex> &vertices,
+                            const std::vector<uint32_t> &indices) {
+  if (vertices.empty() || indices.size() < 3) {
+    return;
+  }
+
+  std::unordered_map<glm::vec3, glm::vec3> normalAccum;
+  normalAccum.reserve(vertices.size());
+
+  for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+    const uint32_t i0 = indices[i + 0];
+    const uint32_t i1 = indices[i + 1];
+    const uint32_t i2 = indices[i + 2];
+    if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size()) {
+      continue;
+    }
+
+    const glm::vec3 edge1 = vertices[i1].pos - vertices[i0].pos;
+    const glm::vec3 edge2 = vertices[i2].pos - vertices[i0].pos;
+    const glm::vec3 faceNormal = glm::cross(edge1, edge2);
+    if (glm::length(faceNormal) < 0.0001f) {
+      continue;
+    }
+
+    const glm::vec3 weightedNormal = glm::normalize(faceNormal);
+    normalAccum[vertices[i0].pos] += weightedNormal;
+    normalAccum[vertices[i1].pos] += weightedNormal;
+    normalAccum[vertices[i2].pos] += weightedNormal;
+  }
+
+  for (auto &vertex : vertices) {
+    const auto it = normalAccum.find(vertex.pos);
+    if (it == normalAccum.end() || glm::length(it->second) < 0.0001f) {
+      vertex.normal = {0.0f, 0.0f, 1.0f};
+      continue;
+    }
+    vertex.normal = glm::normalize(it->second);
+  }
+}
+
 } // namespace
 
 void GltfModelAsset::load(const std::string &path) {
@@ -486,6 +526,10 @@ void GltfModelAsset::load(const std::string &path) {
                          glm::mat4(1.0f));
       }
     }
+  }
+
+  if (recomputeSmoothNormalsEnabled) {
+    recomputeSmoothNormals(vertices, indices);
   }
 
   geometryMesh.setImportedGeometry(std::move(vertices), std::move(indices),

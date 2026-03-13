@@ -76,6 +76,11 @@ private:
            std::filesystem::exists(textureSource.resolvedPath);
   }
 
+  static bool hasTextureSource(
+      const ModelMaterialData::TextureSource &textureSource) {
+    return hasAvailableTexture(textureSource) || textureSource.hasEmbeddedRgba();
+  }
+
   static void createTextureFromSource(
       Texture &texture, const ModelMaterialData::TextureSource &textureSource,
       const std::array<uint8_t, 4> &fallbackColor, TextureEncoding encoding,
@@ -99,11 +104,13 @@ private:
 
   static MaterialUniformData
   buildMaterialUniform(const ModelMaterialData &material) {
+    const float normalScale =
+        hasTextureSource(material.normalTexture) ? material.normalScale : 0.0f;
     return MaterialUniformData{
         .baseColorFactor = material.baseColorFactor,
         .emissiveFactor = glm::vec4(material.emissiveFactor, 1.0f),
         .surfaceParams = {material.metallicFactor, material.roughnessFactor,
-                          material.normalScale, material.occlusionStrength},
+                          normalScale, material.occlusionStrength},
     };
   }
 

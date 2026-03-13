@@ -13,6 +13,7 @@ enum class TonemapOperator : uint32_t {
   None = 0,
   Reinhard = 1,
   ACES = 2,
+  Filmic = 3,
 };
 
 class TonemapPass : public FullscreenRenderPass {

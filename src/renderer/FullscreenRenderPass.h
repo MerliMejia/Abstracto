@@ -65,6 +65,8 @@ private:
 
   void initializePassResources(DeviceContext &deviceContext,
                                SwapchainContext &swapchainContext) final {
+    initializeAdditionalPassResources(deviceContext, swapchainContext);
+
     auto bindings = imageInputBindings();
     if (!bindings.empty()) {
       sampler.create(deviceContext);
@@ -73,17 +75,15 @@ private:
                         resolveImageBindings(sampler.handle()));
       imageSetInitialized = true;
     }
-
-    initializeAdditionalPassResources(deviceContext, swapchainContext);
   }
 
   void recreatePassResources(DeviceContext &deviceContext,
                              SwapchainContext &swapchainContext) final {
+    recreateAdditionalPassResources(deviceContext, swapchainContext);
+
     if (imageSetInitialized) {
       images.update(deviceContext, resolveImageBindings(sampler.handle()));
     }
-
-    recreateAdditionalPassResources(deviceContext, swapchainContext);
   }
 
   void bindPassResources(const RenderPassContext &context) final {

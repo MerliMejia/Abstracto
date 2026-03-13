@@ -39,6 +39,24 @@ float3 ReinhardWhitePoint(float3 x, float whitePoint) {
     return (x * (1.0 + x / white2)) / (1.0 + x);
 }
 
+float3 FilmicCurve(float3 x) {
+    const float A = 0.15;
+    const float B = 0.50;
+    const float C = 0.10;
+    const float D = 0.20;
+    const float E = 0.02;
+    const float F = 0.30;
+    return ((x * (A * x + C * B) + D * E) /
+            (x * (A * x + B) + D * F)) -
+           E / F;
+}
+
+float3 Uncharted2Filmic(float3 x, float whitePoint) {
+    float3 curr = FilmicCurve(max(x, 0.0.xxx));
+    float3 whiteScale = 1.0.xxx / max(FilmicCurve(whitePoint.xxx), 1e-4.xxx);
+    return saturate(curr * whiteScale);
+}
+
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_TARGET {
     float exposure = tonemapPush.params0.x;
@@ -53,8 +71,10 @@ float4 fragMain(VSOutput input) : SV_TARGET {
         mapped = hdr / max(whitePoint, 1e-4);
     } else if (operatorIndex < 1.5) {
         mapped = ReinhardWhitePoint(hdr, whitePoint);
-    } else {
+    } else if (operatorIndex < 2.5) {
         mapped = ACESFilm(hdr / max(whitePoint, 1e-4));
+    } else {
+        mapped = Uncharted2Filmic(hdr, whitePoint);
     }
 
     float invGamma = 1.0 / max(gamma, 1e-4);

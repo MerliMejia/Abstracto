@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
 #include <iostream>
 #include <memory>
@@ -36,7 +37,7 @@ enum class PresentedOutput : uint32_t {
   GBufferEmissive = 3,
   GBufferDepth = 4,
   GeometryPass = 5,
-  LightPass = 6,
+  PbrPass = 6,
   TonemapPass = 7,
 };
 
@@ -78,29 +79,103 @@ private:
   FullscreenMesh lightQuad;
   FrameUniforms frameUniforms;
   Sampler sampler;
+  ImageBasedLightingResources iblResources;
+  GeometryPass *geometryPass = nullptr;
   PbrPass *pbrPass = nullptr;
   TonemapPass *tonemapPass = nullptr;
   DebugPass *debugPass = nullptr;
   ImGuiPass *imguiPass = nullptr;
   std::chrono::steady_clock::time_point lastFrameTime =
       std::chrono::steady_clock::now();
-  float lightAzimuthRadians = glm::radians(225.0f);
-  float lightElevationRadians = glm::radians(-35.264f);
-  float lightIntensity = 1.0f;
-  glm::vec3 lightColor = {1.0f, 0.95f, 0.9f};
+  float lightAzimuthRadians = glm::radians(-129.316f);
+  float lightElevationRadians = glm::radians(-39.011f);
+  float lightIntensity = 13.263f;
+  glm::vec3 lightColor = {1.0f, 242.0f / 255.0f, 230.0f / 255.0f};
   float exposure = 1.0f;
-  float autoExposureKey = 1.0f;
-  float whitePoint = 4.0f;
-  float gamma = 2.2f;
-  bool autoExposureEnabled = false;
+  float autoExposureKey = 2.5f;
+  float whitePoint = 2.716f;
+  float gamma = 1.684f;
+  bool autoExposureEnabled = true;
   TonemapOperator tonemapOperator = TonemapOperator::ACES;
   PresentedOutput presentedOutput = PresentedOutput::TonemapPass;
+  PbrDebugView pbrDebugView = PbrDebugView::Final;
   int selectedMaterialIndex = 0;
+  float environmentIntensity = 1.1f;
+  float environmentBackgroundWeight = 1.0f;
+  float environmentDiffuseWeight = 0.85f;
+  float environmentSpecularWeight = 1.35f;
+  float dielectricSpecularScale = 2.4f;
+  float environmentRotationRadians = 0.0f;
+  bool iblEnabled = true;
+  bool skyboxVisible = true;
+  bool syncSkySunToLight = true;
+  ImageBasedLightingBakeSettings iblBakeSettings{};
+  glm::vec3 modelPosition = {0.0f, 0.0f, 0.0f};
+  glm::vec3 modelRotationDegrees = {90.0f, 180.0f, 0.0f};
+  glm::vec3 modelScale = {0.5f, 0.5f, 0.5f};
+  bool smoothGltfNormalsEnabled = false;
+  glm::vec3 cameraPosition = {2.7f, 2.7f, 1.1f};
+  float cameraYawRadians = glm::radians(-135.0f);
+  float cameraPitchRadians = glm::radians(-11.1f);
+  float cameraMoveSpeed = 2.5f;
+  float cameraLookSensitivity = 0.0035f;
+  bool cameraLookActive = false;
+  double lastCursorX = 0.0;
+  double lastCursorY = 0.0;
 
   void initWindow() { window.create(WIDTH, HEIGHT, "Double Pass"); }
 
+  void resetCamera() {
+    cameraPosition = {2.7f, 2.7f, 1.1f};
+    cameraYawRadians = glm::radians(-135.0f);
+    cameraPitchRadians = glm::radians(-11.1f);
+    cameraLookActive = false;
+  }
+
+  glm::vec3 currentCameraForward() const {
+    const float cosPitch = std::cos(cameraPitchRadians);
+    return glm::normalize(glm::vec3(std::cos(cameraYawRadians) * cosPitch,
+                                    std::sin(cameraYawRadians) * cosPitch,
+                                    std::sin(cameraPitchRadians)));
+  }
+
+  void syncProceduralSkySunWithLight() {
+    const glm::vec3 sunDirection = -currentLightDirectionWorld();
+    iblBakeSettings.sky.sunAzimuthRadians =
+        std::atan2(sunDirection.y, sunDirection.x);
+    iblBakeSettings.sky.sunElevationRadians =
+        std::asin(glm::clamp(sunDirection.z, -1.0f, 1.0f));
+  }
+
+  std::string sceneModelPath() const {
+    return ASSET_PATH + "/models/material_test.glb";
+  }
+
+  void rebuildSceneRenderItems() {
+    renderItems = sceneModel.buildRenderItems(geometryPass);
+    renderItems.push_back(RenderItem{.mesh = &lightQuad,
+                                     .descriptorBindings = nullptr,
+                                     .targetPass = pbrPass});
+    renderItems.push_back(RenderItem{.mesh = &lightQuad,
+                                     .descriptorBindings = nullptr,
+                                     .targetPass = tonemapPass});
+    renderItems.push_back(RenderItem{.mesh = &lightQuad,
+                                     .descriptorBindings = nullptr,
+                                     .targetPass = debugPass});
+  }
+
+  void reloadSceneModel() {
+    backend.waitIdle();
+    sceneModel.setSmoothGltfNormalsEnabled(smoothGltfNormalsEnabled);
+    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
+                            renderer.descriptorSetLayout(), frameUniforms,
+                            sampler, MAX_FRAMES_IN_FLIGHT);
+    rebuildSceneRenderItems();
+  }
+
   void initVulkan() {
     backend.initialize(window, config);
+    iblBakeSettings.environmentHdrPath = ASSET_PATH + "/textures/skybox.hdr";
 
     sampler.create(deviceContext());
 
@@ -108,12 +183,13 @@ private:
     lightQuad.createVertexBuffer(commandContext(), deviceContext());
     lightQuad.createIndexBuffer(commandContext(), deviceContext());
 
-    auto geometryPass = std::make_unique<GeometryPass>(
+    auto geometryPassLocal = std::make_unique<GeometryPass>(
         PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/geometry_pass.spv",
                      .cullMode = vk::CullModeFlagBits::eBack,
                      .frontFace = vk::FrontFace::eCounterClockwise});
-    auto *geometryPassPtr = geometryPass.get();
-    renderer.addPass(std::move(geometryPass));
+    auto *geometryPassPtr = geometryPassLocal.get();
+    geometryPass = geometryPassPtr;
+    renderer.addPass(std::move(geometryPassLocal));
 
     auto pbrPassLocal = std::make_unique<PbrPass>(
         PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/pbr_pass.spv",
@@ -121,6 +197,11 @@ private:
                      .enableDepthWrite = false},
         MAX_FRAMES_IN_FLIGHT, geometryPassPtr);
     pbrPass = pbrPassLocal.get();
+    if (syncSkySunToLight) {
+      syncProceduralSkySunWithLight();
+    }
+    iblResources.create(deviceContext(), commandContext(), iblBakeSettings);
+    pbrPass->setImageBasedLighting(iblResources);
     renderer.addPass(std::move(pbrPassLocal));
 
     auto tonemapPassLocal = std::make_unique<TonemapPass>(
@@ -149,21 +230,11 @@ private:
     renderer.initialize(deviceContext(), swapchainContext());
 
     frameUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.loadFromFile(ASSET_PATH + "/models/chronograph_watch.glb",
-                            commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(), frameUniforms,
-                            sampler, MAX_FRAMES_IN_FLIGHT);
-
-    renderItems = sceneModel.buildRenderItems(geometryPassPtr);
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = pbrPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = tonemapPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = debugPass});
+    sceneModel.setSmoothGltfNormalsEnabled(smoothGltfNormalsEnabled);
+    sceneModel.loadFromFile(sceneModelPath(), commandContext(),
+                            deviceContext(), renderer.descriptorSetLayout(),
+                            frameUniforms, sampler, MAX_FRAMES_IN_FLIGHT);
+    rebuildSceneRenderItems();
   }
 
   bool buildMaterialEditorUi() {
@@ -253,7 +324,8 @@ private:
     ImGui::SeparatorText("Tonemap");
 
     int tonemapOperatorIndex = static_cast<int>(tonemapOperator);
-    ImGui::Combo("Operator", &tonemapOperatorIndex, "None\0Reinhard\0ACES\0");
+    ImGui::Combo("Operator", &tonemapOperatorIndex,
+                 "None\0Reinhard\0ACES\0Filmic\0");
     tonemapOperator = static_cast<TonemapOperator>(tonemapOperatorIndex);
 
     ImGui::Checkbox("Auto Exposure", &autoExposureEnabled);
@@ -269,7 +341,7 @@ private:
     ImGui::End();
   }
 
-  void buildDebugUi() {
+  void buildViewUi() {
     ImGui::Begin("View");
     int output = static_cast<int>(presentedOutput);
     ImGui::SeparatorText("GBuffers (Geometry Pass)");
@@ -287,8 +359,8 @@ private:
     ImGui::SeparatorText("Pass Outputs");
     ImGui::RadioButton("Geometry Pass", &output,
                        static_cast<int>(PresentedOutput::GeometryPass));
-    ImGui::RadioButton("Light Pass", &output,
-                       static_cast<int>(PresentedOutput::LightPass));
+    ImGui::RadioButton("PBR Pass", &output,
+                       static_cast<int>(PresentedOutput::PbrPass));
     ImGui::RadioButton("Tone Mapping Pass", &output,
                        static_cast<int>(PresentedOutput::TonemapPass));
 
@@ -299,12 +371,192 @@ private:
     ImGui::End();
   }
 
+  void buildTransformUi() {
+    ImGui::Begin("Transform");
+    ImGui::DragFloat3("Position", &modelPosition.x, 0.01f);
+    ImGui::SliderFloat3("Rotation", &modelRotationDegrees.x, -180.0f, 180.0f);
+    ImGui::DragFloat3("Scale", &modelScale.x, 0.1f, 0.01f, 200.0f);
+    ImGui::Separator();
+    ImGui::Checkbox("Smooth glTF Normals", &smoothGltfNormalsEnabled);
+    if (ImGui::Button("Reload Model")) {
+      reloadSceneModel();
+    }
+    ImGui::End();
+  }
+
+  void buildCameraUi() {
+    ImGui::Begin("Camera");
+    ImGui::TextUnformatted("Move: WASD + Q/E");
+    ImGui::TextUnformatted("Look: Hold RMB and drag");
+    ImGui::SliderFloat("Move Speed", &cameraMoveSpeed, 0.5f, 10.0f);
+    ImGui::SliderFloat("Look Sensitivity", &cameraLookSensitivity, 0.001f,
+                       0.01f);
+    if (ImGui::Button("Reset Camera")) {
+      resetCamera();
+    }
+    ImGui::Text("Position: %.2f %.2f %.2f", cameraPosition.x, cameraPosition.y,
+                cameraPosition.z);
+    ImGui::End();
+  }
+
+  void buildPbrDebugUi() {
+    ImGui::Begin("PBR Debug");
+    int pbrDebugMode = static_cast<int>(pbrDebugView);
+    ImGui::RadioButton("Final", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::Final));
+    ImGui::RadioButton("Direct Lighting", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::DirectLighting));
+    ImGui::RadioButton("IBL Diffuse", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::IblDiffuse));
+    ImGui::RadioButton("IBL Specular", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::IblSpecular));
+    ImGui::RadioButton("Ambient Total", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::AmbientTotal));
+    ImGui::RadioButton("Reflections", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::Reflections));
+    ImGui::RadioButton("Background", &pbrDebugMode,
+                       static_cast<int>(PbrDebugView::Background));
+    pbrDebugView = static_cast<PbrDebugView>(pbrDebugMode);
+    ImGui::End();
+
+    if (pbrPass != nullptr) {
+      pbrPass->setDebugView(pbrDebugView);
+    }
+  }
+
+  bool buildEnvironmentUi() {
+    ImGui::Begin("Environment");
+    ImGui::Checkbox("Enable IBL", &iblEnabled);
+    ImGui::Checkbox("Show Skybox", &skyboxVisible);
+    ImGui::SliderFloat("Env Intensity", &environmentIntensity, 0.0f, 4.0f);
+    ImGui::SliderFloat("Skybox Weight", &environmentBackgroundWeight, 0.0f,
+                       4.0f);
+    ImGui::SliderFloat("Diffuse IBL", &environmentDiffuseWeight, 0.0f, 4.0f);
+    ImGui::SliderFloat("Specular IBL", &environmentSpecularWeight, 0.0f, 4.0f);
+    ImGui::SliderFloat("Dielectric Specular", &dielectricSpecularScale, 0.5f,
+                       3.0f);
+    ImGui::SliderAngle("Env Rotation", &environmentRotationRadians, -180.0f,
+                       180.0f);
+    ImGui::End();
+
+    ImGui::Begin("Procedural Sky");
+    ImGui::TextUnformatted("Changes here do not rebuild automatically.");
+    ImGui::TextUnformatted("Use the button below to regenerate the IBL.");
+    ImGui::Separator();
+    if (!iblBakeSettings.environmentHdrPath.empty()) {
+      ImGui::TextWrapped("Using HDRI environment: %s",
+                         iblBakeSettings.environmentHdrPath.c_str());
+      ImGui::TextUnformatted(
+          "Procedural sky controls are ignored while an HDRI is active.");
+    } else {
+      ImGui::Checkbox("Sync Sun To Light", &syncSkySunToLight);
+
+      if (syncSkySunToLight) {
+        syncProceduralSkySunWithLight();
+        ImGui::Text("Sun Azimuth: %.1f deg",
+                    glm::degrees(iblBakeSettings.sky.sunAzimuthRadians));
+        ImGui::Text("Sun Elevation: %.1f deg",
+                    glm::degrees(iblBakeSettings.sky.sunElevationRadians));
+      } else {
+        float sunAzimuthDegrees =
+            glm::degrees(iblBakeSettings.sky.sunAzimuthRadians);
+        float sunElevationDegrees =
+            glm::degrees(iblBakeSettings.sky.sunElevationRadians);
+        if (ImGui::SliderFloat("Sun Azimuth", &sunAzimuthDegrees, -180.0f,
+                               180.0f)) {
+          iblBakeSettings.sky.sunAzimuthRadians =
+              glm::radians(sunAzimuthDegrees);
+        }
+        if (ImGui::SliderFloat("Sun Elevation", &sunElevationDegrees, -89.0f,
+                               89.0f)) {
+          iblBakeSettings.sky.sunElevationRadians =
+              glm::radians(sunElevationDegrees);
+        }
+      }
+
+      ImGui::ColorEdit3("Zenith", &iblBakeSettings.sky.zenithColor.x);
+      ImGui::ColorEdit3("Horizon", &iblBakeSettings.sky.horizonColor.x);
+      ImGui::ColorEdit3("Ground", &iblBakeSettings.sky.groundColor.x);
+      ImGui::ColorEdit3("Sun Color", &iblBakeSettings.sky.sunColor.x);
+      ImGui::SliderFloat("Sun Intensity", &iblBakeSettings.sky.sunIntensity,
+                         0.0f, 80.0f);
+      ImGui::SliderFloat("Sun Radius", &iblBakeSettings.sky.sunAngularRadius,
+                         0.005f, 0.15f);
+      ImGui::SliderFloat("Sun Glow", &iblBakeSettings.sky.sunGlow, 0.0f, 8.0f);
+      ImGui::SliderFloat("Horizon Glow", &iblBakeSettings.sky.horizonGlow,
+                         0.0f, 1.0f);
+    }
+
+    const bool rebuildRequested = ImGui::Button("Rebuild IBL");
+    ImGui::End();
+    return rebuildRequested;
+  }
+
   glm::vec3 currentLightDirectionWorld() const {
     const float cosElevation = std::cos(lightElevationRadians);
     return glm::normalize(
         glm::vec3(cosElevation * std::cos(lightAzimuthRadians),
                   cosElevation * std::sin(lightAzimuthRadians),
                   std::sin(lightElevationRadians)));
+  }
+
+  void updateFreeCamera(float deltaSeconds) {
+    ImGuiIO &io = ImGui::GetIO();
+    GLFWwindow *glfwWindow = window.handle();
+
+    if (glfwGetMouseButton(glfwWindow, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+      double cursorX = 0.0;
+      double cursorY = 0.0;
+      glfwGetCursorPos(glfwWindow, &cursorX, &cursorY);
+
+      if (!cameraLookActive && !io.WantCaptureMouse) {
+        cameraLookActive = true;
+        lastCursorX = cursorX;
+        lastCursorY = cursorY;
+      } else if (cameraLookActive) {
+        const double deltaX = cursorX - lastCursorX;
+        const double deltaY = cursorY - lastCursorY;
+        lastCursorX = cursorX;
+        lastCursorY = cursorY;
+
+        cameraYawRadians -= static_cast<float>(deltaX) * cameraLookSensitivity;
+        cameraPitchRadians -=
+            static_cast<float>(deltaY) * cameraLookSensitivity;
+        cameraPitchRadians = glm::clamp(
+            cameraPitchRadians, glm::radians(-89.0f), glm::radians(89.0f));
+      }
+    } else {
+      cameraLookActive = false;
+    }
+
+    if (io.WantCaptureKeyboard) {
+      return;
+    }
+
+    const glm::vec3 forward = currentCameraForward();
+    const glm::vec3 worldUp(0.0f, 0.0f, 1.0f);
+    const glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
+    const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+    const float moveStep = cameraMoveSpeed * deltaSeconds;
+
+    if (glfwGetKey(glfwWindow, GLFW_KEY_W) == GLFW_PRESS) {
+      cameraPosition += forward * moveStep;
+    }
+    if (glfwGetKey(glfwWindow, GLFW_KEY_S) == GLFW_PRESS) {
+      cameraPosition -= forward * moveStep;
+    }
+    if (glfwGetKey(glfwWindow, GLFW_KEY_D) == GLFW_PRESS) {
+      cameraPosition += right * moveStep;
+    }
+    if (glfwGetKey(glfwWindow, GLFW_KEY_A) == GLFW_PRESS) {
+      cameraPosition -= right * moveStep;
+    }
+    if (glfwGetKey(glfwWindow, GLFW_KEY_E) == GLFW_PRESS) {
+      cameraPosition += up * moveStep;
+    }
+    if (glfwGetKey(glfwWindow, GLFW_KEY_Q) == GLFW_PRESS) {
+      cameraPosition -= up * moveStep;
+    }
   }
 
   void drawFrame() {
@@ -324,21 +576,44 @@ private:
     if (imguiPass != nullptr) {
       imguiPass->beginFrame();
       const bool materialChanged = buildMaterialEditorUi();
+      buildCameraUi();
+      buildTransformUi();
       buildLightUi();
-      buildDebugUi();
+      buildViewUi();
+      buildPbrDebugUi();
+      const bool iblBakeChanged = buildEnvironmentUi();
       if (materialChanged) {
         sceneModel.syncMaterialParameters();
       }
       imguiPass->endFrame();
+      if (iblBakeChanged) {
+        backend.waitIdle();
+        if (syncSkySunToLight) {
+          syncProceduralSkySunWithLight();
+        }
+        iblResources.rebuild(deviceContext(), commandContext(),
+                             iblBakeSettings);
+        renderer.recreate(deviceContext(), swapchainContext());
+      }
     }
+
+    updateFreeCamera(deltaSeconds);
 
     UniformBufferObject ubo{};
 
     ubo.model = glm::mat4(1.0f);
-    ubo.model = glm::scale(ubo.model, glm::vec3(0.3f));
+    ubo.model = glm::translate(ubo.model, modelPosition);
+    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.x),
+                            glm::vec3(1.0f, 0.0f, 0.0f));
+    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.y),
+                            glm::vec3(0.0f, 1.0f, 0.0f));
+    ubo.model = glm::rotate(ubo.model, glm::radians(modelRotationDegrees.z),
+                            glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.model = glm::scale(ubo.model, modelScale);
+    ubo.modelNormal = glm::transpose(glm::inverse(ubo.model));
 
     ubo.view =
-        glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+        glm::lookAt(cameraPosition, cameraPosition + currentCameraForward(),
                     glm::vec3(0.0f, 0.0f, 1.0f));
 
     ubo.proj = glm::perspective(
@@ -357,9 +632,17 @@ private:
       glm::vec3 lightDirectionView =
           glm::normalize(glm::mat3(ubo.view) * lightDirectionWorld);
 
-      pbrPass->setProjection(ubo.proj);
+      pbrPass->setCamera(ubo.proj, ubo.view);
       pbrPass->setDirectionalLight(lightDirectionView,
                                    lightColor * lightIntensity);
+      pbrPass->setEnvironmentControls(
+          environmentRotationRadians,
+          environmentIntensity * environmentBackgroundWeight,
+          environmentIntensity * environmentDiffuseWeight,
+          environmentIntensity * environmentSpecularWeight, iblEnabled,
+          skyboxVisible);
+      pbrPass->setDielectricSpecularScale(dielectricSpecularScale);
+      pbrPass->setDebugView(pbrDebugView);
     }
     if (tonemapPass != nullptr) {
       const glm::vec3 lightRadiance = lightColor * lightIntensity;

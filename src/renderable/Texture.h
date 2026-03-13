@@ -101,7 +101,7 @@ private:
     stagingBufferMemory.unmapMemory();
 
     RenderUtils::createImage(deviceContext, texWidth, texHeight, mipLevels,
-                             vk::SampleCountFlagBits::e1,
+                             1, vk::SampleCountFlagBits::e1,
                              textureFormat,
                              vk::ImageTiling::eOptimal,
                              vk::ImageUsageFlagBits::eTransferSrc |
@@ -113,7 +113,7 @@ private:
     RenderUtils::transitionImageLayout(
         commandContext, deviceContext, textureImage,
         vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-        mipLevels);
+        mipLevels, 1);
     RenderUtils::copyBufferToImage(
         stagingBuffer, textureImage, static_cast<uint32_t>(texWidth),
         static_cast<uint32_t>(texHeight), commandContext, deviceContext);

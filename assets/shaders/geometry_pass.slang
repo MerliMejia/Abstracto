@@ -14,6 +14,7 @@ struct VSOutput {
 
 struct GeometryData {
     float4x4 model;
+    float4x4 modelNormal;
     float4x4 view;
     float4x4 proj;
 };
@@ -46,7 +47,7 @@ VSOutput vertMain(VSInput input) {
     float4 viewPos = mul(ubo.view, worldPos);
     o.position = mul(ubo.proj, viewPos);
 
-    float3 normalWS = normalize(mul((float3x3)ubo.model, input.normal));
+    float3 normalWS = normalize(mul((float3x3)ubo.modelNormal, input.normal));
     float3 tangentWS = normalize(mul((float3x3)ubo.model, input.tangent.xyz));
     o.normalVS = normalize(mul((float3x3)ubo.view, normalWS));
     o.tangentVS = float4(normalize(mul((float3x3)ubo.view, tangentWS)),
@@ -74,11 +75,14 @@ FSOutput fragMain(VSOutput input) {
     float3 emissive = emissiveSample * materialParams.emissiveFactor.rgb;
 
     float3 N = normalize(input.normalVS);
-    float3 T = normalize(input.tangentVS.xyz - N * dot(N, input.tangentVS.xyz));
-    float3 B = normalize(cross(N, T)) * input.tangentVS.w;
-    float3x3 tbn = float3x3(T, B, N);
-    normalSample.xy *= materialParams.surfaceParams.z;
-    float3 normalVS = normalize(mul(tbn, normalSample));
+    float3 normalVS = N;
+    if (materialParams.surfaceParams.z > 0.0) {
+        float3 T = normalize(input.tangentVS.xyz - N * dot(N, input.tangentVS.xyz));
+        float3 B = normalize(cross(N, T)) * input.tangentVS.w;
+        float3x3 tbn = float3x3(T, B, N);
+        normalSample.xy *= materialParams.surfaceParams.z;
+        normalVS = normalize(mul(tbn, normalSample));
+    }
     float3 packedNormal = normalVS * 0.5 + 0.5;
 
     o.gbuffer0 = float4(albedo,

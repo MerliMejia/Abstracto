@@ -56,16 +56,19 @@ public:
 
   static void createImage(DeviceContext &deviceContext, uint32_t width,
                           uint32_t height, uint32_t mipLevels,
+                          uint32_t arrayLayers,
                           vk::SampleCountFlagBits numSamples, vk::Format format,
                           vk::ImageTiling tiling, vk::ImageUsageFlags usage,
                           vk::MemoryPropertyFlags properties,
                           vk::raii::Image &image,
-                          vk::raii::DeviceMemory &imageMemory) {
+                          vk::raii::DeviceMemory &imageMemory,
+                          vk::ImageCreateFlags flags = {}) {
     vk::ImageCreateInfo imageInfo{.imageType = vk::ImageType::e2D,
+                                  .flags = flags,
                                   .format = format,
                                   .extent = {width, height, 1},
                                   .mipLevels = mipLevels,
-                                  .arrayLayers = 1,
+                                  .arrayLayers = arrayLayers,
                                   .samples = numSamples,
                                   .tiling = tiling,
                                   .usage = usage,
@@ -88,7 +91,8 @@ public:
                                     const vk::raii::Image &image,
                                     const vk::ImageLayout oldLayout,
                                     const vk::ImageLayout newLayout,
-                                    uint32_t mipLevels) {
+                                    uint32_t mipLevels,
+                                    uint32_t arrayLayers = 1) {
     const auto commandBuffer =
         RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
 
@@ -97,7 +101,7 @@ public:
         .newLayout = newLayout,
         .image = image,
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, mipLevels, 0,
-                             1}};
+                             arrayLayers}};
 
     vk::PipelineStageFlags sourceStage;
     vk::PipelineStageFlags destinationStage;
@@ -129,17 +133,28 @@ public:
                                 const vk::raii::Image &image, uint32_t width,
                                 uint32_t height, CommandContext &commandContext,
                                 DeviceContext &deviceContext) {
+    copyBufferToImage(
+        buffer, image,
+        std::vector<vk::BufferImageCopy>{
+            vk::BufferImageCopy{.bufferOffset = 0,
+                                .bufferRowLength = 0,
+                                .bufferImageHeight = 0,
+                                .imageSubresource = {vk::ImageAspectFlagBits::eColor,
+                                                     0, 0, 1},
+                                .imageOffset = {0, 0, 0},
+                                .imageExtent = {width, height, 1}}},
+        commandContext, deviceContext);
+  }
+
+  static void copyBufferToImage(const vk::raii::Buffer &buffer,
+                                const vk::raii::Image &image,
+                                const std::vector<vk::BufferImageCopy> &regions,
+                                CommandContext &commandContext,
+                                DeviceContext &deviceContext) {
     std::unique_ptr<vk::raii::CommandBuffer> commandBuffer =
         RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
-    vk::BufferImageCopy region{
-        .bufferOffset = 0,
-        .bufferRowLength = 0,
-        .bufferImageHeight = 0,
-        .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-        .imageOffset = {0, 0, 0},
-        .imageExtent = {width, height, 1}};
     commandBuffer->copyBufferToImage(
-        buffer, image, vk::ImageLayout::eTransferDstOptimal, {region});
+        buffer, image, vk::ImageLayout::eTransferDstOptimal, regions);
     RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
                                        *commandBuffer);
   }
