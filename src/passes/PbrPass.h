@@ -54,10 +54,9 @@ public:
     sourcePassRef = &sourcePass;
   }
 
-  void setImageBasedLighting(const ImageBasedLightingResources &ibl) {
-    iblResources = &ibl;
-    pushData.lightColorAndPrefilterMip.w =
-        static_cast<float>(std::max(ibl.prefilteredMap.mipLevelCount(), 1u) - 1u);
+  void setImageBasedLighting(const ImageBasedLighting &imageBasedLighting) {
+    ibl = &imageBasedLighting;
+    pushData.lightColorAndPrefilterMip.w = ibl->maxPrefilterMipLevel();
   }
 
   void setCamera(const glm::mat4 &proj, const glm::mat4 &view) {
@@ -157,19 +156,10 @@ protected:
         {.binding = 3,
          .resource = sourcePassRef->sampledColorOutput(3, sampler)},
         {.binding = 4, .resource = sourcePassRef->sampledDepthOutput(sampler)},
-        {.binding = 5,
-         .resource =
-             iblResources->environmentMap.sampledResource(
-                 iblResources->environmentSampler.handle())},
-        {.binding = 6,
-         .resource = iblResources->irradianceMap.sampledResource(
-             iblResources->irradianceSampler.handle())},
-        {.binding = 7,
-         .resource = iblResources->prefilteredMap.sampledResource(
-             iblResources->prefilteredSampler.handle())},
-        {.binding = 8,
-         .resource = iblResources->brdfLut.sampledResource(
-             iblResources->brdfSampler.handle())},
+        {.binding = 5, .resource = ibl->environmentResource()},
+        {.binding = 6, .resource = ibl->irradianceResource()},
+        {.binding = 7, .resource = ibl->prefilteredResource()},
+        {.binding = 8, .resource = ibl->brdfResource()},
     };
   }
 
@@ -181,14 +171,14 @@ protected:
 
 private:
   const GeometryPass *sourcePassRef = nullptr;
-  const ImageBasedLightingResources *iblResources = nullptr;
+  const ImageBasedLighting *ibl = nullptr;
   PbrPassPushConstant pushData{};
 
   void validateResources() const {
     if (sourcePassRef == nullptr) {
       throw std::runtime_error("PbrPass requires a GeometryPass source");
     }
-    if (iblResources == nullptr) {
+    if (ibl == nullptr) {
       throw std::runtime_error("PbrPass requires image-based lighting resources");
     }
   }

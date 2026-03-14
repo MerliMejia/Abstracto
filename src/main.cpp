@@ -79,12 +79,13 @@ private:
   FullscreenMesh lightQuad;
   FrameGeometryUniforms frameGeometryUniforms;
   Sampler sampler;
-  ImageBasedLightingResources iblResources;
+  ImageBasedLighting imageBasedLighting;
   GeometryPass *geometryPass = nullptr;
   PbrPass *pbrPass = nullptr;
   TonemapPass *tonemapPass = nullptr;
   DebugPass *debugPass = nullptr;
   ImGuiPass *imguiPass = nullptr;
+
   std::chrono::steady_clock::time_point lastFrameTime =
       std::chrono::steady_clock::now();
   float lightAzimuthRadians = glm::radians(-129.316f);
@@ -201,8 +202,9 @@ private:
     if (syncSkySunToLight) {
       syncProceduralSkySunWithLight();
     }
-    iblResources.create(deviceContext(), commandContext(), iblBakeSettings);
-    pbrPass->setImageBasedLighting(iblResources);
+    imageBasedLighting.create(deviceContext(), commandContext(),
+                              iblBakeSettings);
+    pbrPass->setImageBasedLighting(imageBasedLighting);
     renderer.addPass(std::move(pbrPassLocal));
 
     auto tonemapPassLocal = std::make_unique<TonemapPass>(
@@ -232,8 +234,8 @@ private:
 
     frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
     sceneModel.setSmoothGltfNormalsEnabled(smoothGltfNormalsEnabled);
-    sceneModel.loadFromFile(sceneModelPath(), commandContext(),
-                            deviceContext(), renderer.descriptorSetLayout(),
+    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
+                            renderer.descriptorSetLayout(),
                             frameGeometryUniforms, sampler,
                             MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
@@ -485,8 +487,8 @@ private:
       ImGui::SliderFloat("Sun Radius", &iblBakeSettings.sky.sunAngularRadius,
                          0.005f, 0.15f);
       ImGui::SliderFloat("Sun Glow", &iblBakeSettings.sky.sunGlow, 0.0f, 8.0f);
-      ImGui::SliderFloat("Horizon Glow", &iblBakeSettings.sky.horizonGlow,
-                         0.0f, 1.0f);
+      ImGui::SliderFloat("Horizon Glow", &iblBakeSettings.sky.horizonGlow, 0.0f,
+                         1.0f);
     }
 
     const bool rebuildRequested = ImGui::Button("Rebuild IBL");
@@ -593,8 +595,8 @@ private:
         if (syncSkySunToLight) {
           syncProceduralSkySunWithLight();
         }
-        iblResources.rebuild(deviceContext(), commandContext(),
-                             iblBakeSettings);
+        imageBasedLighting.rebuild(deviceContext(), commandContext(),
+                                   iblBakeSettings);
         renderer.recreate(deviceContext(), swapchainContext());
       }
     }
@@ -637,12 +639,10 @@ private:
 
     if (pbrPass != nullptr) {
       glm::vec3 lightDirectionWorld = currentLightDirectionWorld();
-      glm::vec3 lightDirectionView =
-          glm::normalize(glm::mat3(geometryUniformData.view) *
-                         lightDirectionWorld);
+      glm::vec3 lightDirectionView = glm::normalize(
+          glm::mat3(geometryUniformData.view) * lightDirectionWorld);
 
-      pbrPass->setCamera(geometryUniformData.proj,
-                         geometryUniformData.view);
+      pbrPass->setCamera(geometryUniformData.proj, geometryUniformData.view);
       pbrPass->setDirectionalLight(lightDirectionView,
                                    lightColor * lightIntensity);
       pbrPass->setEnvironmentControls(
