@@ -137,6 +137,7 @@ set(ABSTRACTO_SLANG_SOURCES
   ${ABSTRACTO_SHADER_DIR}/texture_pass.slang
   ${ABSTRACTO_SHADER_DIR}/debug_present_pass.slang
   ${ABSTRACTO_SHADER_DIR}/triangle_pass.slang
+  ${ABSTRACTO_SHADER_DIR}/post_process_pass.slang
 )
 
 find_program(ABSTRACTO_SLANGC_EXECUTABLE NAMES slangc)

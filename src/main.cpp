@@ -2,6 +2,7 @@
 #include "backend/BackendConfig.h"
 #include "backend/VulkanBackend.h"
 #include "renderable/Mesh.h"
+#include "renderer/FullscreenRenderPass.h"
 #include "renderer/PassRenderer.h"
 #include "renderer/PipelineSpec.h"
 #include "renderer/UniformSceneRenderPass.h"
@@ -13,6 +14,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 constexpr uint32_t WIDTH = 1280;
@@ -32,15 +34,21 @@ class TrianglePass
     : public UniformSceneRenderPass<TriangleUniformData, TrianglePushConstant> {
 public:
   TrianglePass(PipelineSpec spec, uint32_t framesInFlight)
-      : UniformSceneRenderPass(std::move(spec), framesInFlight,
-                               RasterPassAttachmentConfig{
-                                   .useColorAttachment = true,
-                                   .useDepthAttachment = false,
-                                   .useMsaaColorAttachment = false,
-                                   .resolveToSwapchain = false,
-                                   .useSwapchainColorAttachment = true,
-                                   .clearColor = {0.08f, 0.08f, 0.10f, 1.0f},
-                               }) {}
+      : UniformSceneRenderPass(
+            std::move(spec), framesInFlight,
+            RasterPassAttachmentConfig{
+                .useColorAttachment = true,
+                .useDepthAttachment = false,
+                .useMsaaColorAttachment = false,
+                .resolveToSwapchain = false,
+                .useSwapchainColorAttachment = false,
+                .colorAttachments = {{
+                    .name = "triangleColor",
+                    .format = RasterAttachmentFormat::RGBA8,
+                    .sampled = true,
+                    .clearColor = {0.08f, 0.08f, 0.10f, 1.0f},
+                }},
+            }) {}
 
   void setElapsedTime(float seconds) { elapsedTimeSeconds = seconds; }
 
@@ -72,6 +80,57 @@ private:
   float elapsedTimeSeconds = 0.0f;
 };
 
+class PostProcessPass : public FullscreenRenderPass {
+public:
+  PostProcessPass(PipelineSpec spec, uint32_t framesInFlight,
+                  const RasterRenderPass *sourcePass = nullptr)
+      : FullscreenRenderPass(std::move(spec), framesInFlight,
+                             RasterPassAttachmentConfig{
+                                 .useColorAttachment = true,
+                                 .useDepthAttachment = false,
+                                 .useMsaaColorAttachment = false,
+                                 .resolveToSwapchain = false,
+                                 .useSwapchainColorAttachment = true,
+                                 .clearColor = {0.02f, 0.02f, 0.02f, 1.0f},
+                             }),
+        sourcePassRef(sourcePass) {}
+
+  void setSourcePass(const RasterRenderPass &sourcePass) {
+    sourcePassRef = &sourcePass;
+  }
+
+protected:
+  std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
+    return {{.binding = 0}};
+  }
+
+  VertexInputLayoutSpec vertexInputLayout() const override {
+    auto attrs = FullscreenVertex::getAttributeDescriptions();
+    return VertexInputLayoutSpec{
+        .bindings = {FullscreenVertex::getBindingDescription()},
+        .attributes = {attrs.begin(), attrs.end()},
+    };
+  }
+
+  std::vector<PassImageBinding>
+  resolveImageBindings(const vk::raii::Sampler &sampler) const override {
+    validateSourcePass();
+
+    return {
+        {.binding = 0, .resource = sourcePassRef->sampledColorOutput(sampler)},
+    };
+  }
+
+private:
+  const RasterRenderPass *sourcePassRef = nullptr;
+
+  void validateSourcePass() const {
+    if (sourcePassRef == nullptr) {
+      throw std::runtime_error("PostProcessPass requires a source pass");
+    }
+  }
+};
+
 class TriangleApp {
 public:
   void run() {
@@ -85,14 +144,16 @@ private:
   AppWindow window;
   VulkanBackend backend;
   BackendConfig config{
-      .appName = "Animated Triangle",
+      .appName = "Fullscreen Post Process",
       .maxFramesInFlight = MAX_FRAMES_IN_FLIGHT,
   };
 
   PassRenderer renderer;
   VertexMesh triangleMesh;
+  FullscreenMesh fullscreenQuadMesh;
   std::vector<RenderItem> renderItems;
   TrianglePass *trianglePass = nullptr;
+  PostProcessPass *postProcessPass = nullptr;
   const std::chrono::steady_clock::time_point startTime =
       std::chrono::steady_clock::now();
 
@@ -100,7 +161,7 @@ private:
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
 
-  void initWindow() { window.create(WIDTH, HEIGHT, "Animated Triangle"); }
+  void initWindow() { window.create(WIDTH, HEIGHT, "Fullscreen Post Process"); }
 
   void initVulkan() {
     backend.initialize(window, config);
@@ -116,6 +177,10 @@ private:
     triangleMesh.createVertexBuffer(commandContext(), deviceContext());
     triangleMesh.createIndexBuffer(commandContext(), deviceContext());
 
+    fullscreenQuadMesh = buildFullscreenQuadMesh();
+    fullscreenQuadMesh.createVertexBuffer(commandContext(), deviceContext());
+    fullscreenQuadMesh.createIndexBuffer(commandContext(), deviceContext());
+
     auto trianglePassLocal = std::make_unique<TrianglePass>(
         PipelineSpec{
             .shaderPath = ASSET_PATH + "/shaders/triangle_pass.spv",
@@ -126,7 +191,20 @@ private:
         MAX_FRAMES_IN_FLIGHT);
 
     trianglePass = trianglePassLocal.get();
+
+    auto postProcessPassLocal = std::make_unique<PostProcessPass>(
+        PipelineSpec{
+            .shaderPath = ASSET_PATH + "/shaders/post_process_pass.spv",
+            .cullMode = vk::CullModeFlagBits::eNone,
+            .enableDepthTest = false,
+            .enableDepthWrite = false,
+        },
+        MAX_FRAMES_IN_FLIGHT, trianglePass);
+
+    postProcessPass = postProcessPassLocal.get();
+
     renderer.addPass(std::move(trianglePassLocal));
+    renderer.addPass(std::move(postProcessPassLocal));
     renderer.initialize(deviceContext(), swapchainContext());
 
     renderItems = {
@@ -134,6 +212,11 @@ private:
             .mesh = &triangleMesh,
             .descriptorBindings = nullptr,
             .targetPass = trianglePass,
+        },
+        RenderItem{
+            .mesh = &fullscreenQuadMesh,
+            .descriptorBindings = nullptr,
+            .targetPass = postProcessPass,
         },
     };
   }
