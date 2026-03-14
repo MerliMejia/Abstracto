@@ -1,184 +1,96 @@
 #include "backend/AppWindow.h"
 #include "backend/BackendConfig.h"
 #include "backend/VulkanBackend.h"
-#include "passes/DebugPass.h"
-#include "passes/GeometryPass.h"
-#include "passes/ImGuiPass.h"
-#include "passes/PbrPass.h"
-#include "passes/TonemapPass.h"
-#include "renderable/FrameGeometryUniforms.h"
-#include "renderable/RenderableModel.h"
-#include "renderable/Sampler.h"
+#include "renderable/Mesh.h"
 #include "renderer/PassRenderer.h"
 #include "renderer/PipelineSpec.h"
-#include "renderer/RenderPass.h"
-#include "utils/DefaultDebugUI.h"
-#include "vulkan/vulkan.hpp"
-#include <algorithm>
-#include <chrono>
-#include <cmath>
+#include "renderer/SceneRenderPass.h"
+
 #include <cstdlib>
 #include <exception>
-#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <memory>
+#include <vector>
 
 constexpr uint32_t WIDTH = 1280;
 constexpr uint32_t HEIGHT = 720;
-constexpr int MAX_FRAMES_IN_FLIGHT = 2;
-constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 const std::string ASSET_PATH = "assets";
 
-class DoublePassApp {
+class TrianglePass : public SceneRenderPass {
+public:
+  explicit TrianglePass(PipelineSpec spec)
+      : SceneRenderPass(std::move(spec),
+                        RasterPassAttachmentConfig{
+                            .useColorAttachment = true,
+                            .useDepthAttachment = false,
+                            .useMsaaColorAttachment = false,
+                            .resolveToSwapchain = false,
+                            .useSwapchainColorAttachment = true,
+                            .clearColor = {0.08f, 0.08f, 0.10f, 1.0f},
+                        }) {}
+};
+
+class TriangleApp {
 public:
   void run() {
     initWindow();
     initVulkan();
-    mainLopp();
+    mainLoop();
     cleanup();
   }
 
 private:
   AppWindow window;
   VulkanBackend backend;
-  BackendConfig config{.appName = "Double Pass",
-                       .maxFramesInFlight = MAX_FRAMES_IN_FLIGHT};
+  BackendConfig config{
+      .appName = "Triangle To Swapchain",
+      .maxFramesInFlight = MAX_FRAMES_IN_FLIGHT,
+  };
+
+  PassRenderer renderer;
+  VertexMesh triangleMesh;
+  std::vector<RenderItem> renderItems;
+  TrianglePass *trianglePass = nullptr;
 
   DeviceContext &deviceContext() { return backend.device(); }
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
 
-  PassRenderer renderer;
-  std::vector<RenderItem> renderItems;
-
-  RenderableModel sceneModel;
-  FullscreenMesh lightQuad;
-  FrameGeometryUniforms frameGeometryUniforms;
-  Sampler sampler;
-  ImageBasedLighting imageBasedLighting;
-  GeometryPass *geometryPass = nullptr;
-  PbrPass *pbrPass = nullptr;
-  TonemapPass *tonemapPass = nullptr;
-  DebugPass *debugPass = nullptr;
-  ImGuiPass *imguiPass = nullptr;
-
-  std::chrono::steady_clock::time_point lastFrameTime =
-      std::chrono::steady_clock::now();
-  DefaultDebugUISettings debugUiSettings;
-
-  void initWindow() { window.create(WIDTH, HEIGHT, "Double Pass"); }
-
-  void syncProceduralSkySunWithLight() {
-    const glm::vec3 sunDirection = -currentLightDirectionWorld();
-    debugUiSettings.iblBakeSettings.sky.sunAzimuthRadians =
-        std::atan2(sunDirection.y, sunDirection.x);
-    debugUiSettings.iblBakeSettings.sky.sunElevationRadians =
-        std::asin(glm::clamp(sunDirection.z, -1.0f, 1.0f));
-  }
-
-  std::string sceneModelPath() const {
-    return ASSET_PATH + "/models/material_test.glb";
-  }
-
-  void rebuildSceneRenderItems() {
-    renderItems = sceneModel.buildRenderItems(geometryPass);
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = pbrPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = tonemapPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = debugPass});
-  }
-
-  void reloadSceneModel() {
-    backend.waitIdle();
-    sceneModel.setSmoothGltfNormalsEnabled(
-        debugUiSettings.smoothGltfNormalsEnabled);
-    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(),
-                            frameGeometryUniforms, sampler,
-                            MAX_FRAMES_IN_FLIGHT);
-    rebuildSceneRenderItems();
-  }
+  void initWindow() { window.create(WIDTH, HEIGHT, "Triangle To Swapchain"); }
 
   void initVulkan() {
     backend.initialize(window, config);
-    debugUiSettings.iblBakeSettings.environmentHdrPath =
-        ASSET_PATH + "/textures/skybox.hdr";
 
-    sampler.create(deviceContext());
+    triangleMesh.setGeometry(
+        {
+            {{0.0f, -0.6f, 0.0f}, {1.0f, 0.2f, 0.2f}, {0.5f, 1.0f}},
+            {{0.6f, 0.6f, 0.0f}, {0.2f, 1.0f, 0.2f}, {1.0f, 0.0f}},
+            {{-0.6f, 0.6f, 0.0f}, {0.2f, 0.4f, 1.0f}, {0.0f, 0.0f}},
+        },
+        {0, 1, 2});
 
-    lightQuad = buildFullscreenQuadMesh();
-    lightQuad.createVertexBuffer(commandContext(), deviceContext());
-    lightQuad.createIndexBuffer(commandContext(), deviceContext());
+    triangleMesh.createVertexBuffer(commandContext(), deviceContext());
+    triangleMesh.createIndexBuffer(commandContext(), deviceContext());
 
-    auto geometryPassLocal = std::make_unique<GeometryPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/geometry_pass.spv",
-                     .cullMode = vk::CullModeFlagBits::eBack,
-                     .frontFace = vk::FrontFace::eCounterClockwise});
-    auto *geometryPassPtr = geometryPassLocal.get();
-    geometryPass = geometryPassPtr;
-    renderer.addPass(std::move(geometryPassLocal));
+    auto trianglePassLocal = std::make_unique<TrianglePass>(PipelineSpec{
+        .shaderPath = ASSET_PATH + "/shaders/triangle_pass.spv",
+        .cullMode = vk::CullModeFlagBits::eNone,
+        .enableDepthTest = false,
+        .enableDepthWrite = false,
+    });
 
-    auto pbrPassLocal = std::make_unique<PbrPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/pbr_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr);
-    pbrPass = pbrPassLocal.get();
-    if (debugUiSettings.syncSkySunToLight) {
-      syncProceduralSkySunWithLight();
-    }
-    imageBasedLighting.create(deviceContext(), commandContext(),
-                              debugUiSettings.iblBakeSettings);
-    pbrPass->setImageBasedLighting(imageBasedLighting);
-    renderer.addPass(std::move(pbrPassLocal));
-
-    auto tonemapPassLocal = std::make_unique<TonemapPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/tonemap_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, pbrPass);
-    tonemapPass = tonemapPassLocal.get();
-    renderer.addPass(std::move(tonemapPassLocal));
-
-    auto debugPassLocal = std::make_unique<DebugPass>(
-        PipelineSpec{.shaderPath =
-                         ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass, tonemapPass);
-    debugPass = debugPassLocal.get();
-    debugPass->setSelectedOutput(
-        static_cast<uint32_t>(debugUiSettings.presentedOutput));
-    renderer.addPass(std::move(debugPassLocal));
-
-    auto imguiPassLocal = std::make_unique<ImGuiPass>(
-        window, backend.instance(), commandContext());
-    imguiPass = imguiPassLocal.get();
-    renderer.addPass(std::move(imguiPassLocal));
-
+    trianglePass = trianglePassLocal.get();
+    renderer.addPass(std::move(trianglePassLocal));
     renderer.initialize(deviceContext(), swapchainContext());
 
-    frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.setSmoothGltfNormalsEnabled(
-        debugUiSettings.smoothGltfNormalsEnabled);
-    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(),
-                            frameGeometryUniforms, sampler,
-                            MAX_FRAMES_IN_FLIGHT);
-    rebuildSceneRenderItems();
-  }
-
-  glm::vec3 currentLightDirectionWorld() const {
-    const float cosElevation = std::cos(debugUiSettings.lightElevationRadians);
-    return glm::normalize(
-        glm::vec3(cosElevation * std::cos(debugUiSettings.lightAzimuthRadians),
-                  cosElevation * std::sin(debugUiSettings.lightAzimuthRadians),
-                  std::sin(debugUiSettings.lightElevationRadians)));
+    renderItems = {
+        RenderItem{
+            .mesh = &triangleMesh,
+            .descriptorBindings = nullptr,
+            .targetPass = trianglePass,
+        },
+    };
   }
 
   void drawFrame() {
@@ -190,151 +102,37 @@ private:
       return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const float deltaSeconds = std::min(
-        std::chrono::duration<float>(now - lastFrameTime).count(), 0.1f);
-    lastFrameTime = now;
-
-    if (imguiPass != nullptr) {
-      imguiPass->beginFrame();
-      DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
-          sceneModel, debugUiSettings,
-          DefaultDebugUICallbacks{
-              .reloadSceneModel = [this]() { reloadSceneModel(); },
-              .syncProceduralSkySunWithLight =
-                  [this]() { syncProceduralSkySunWithLight(); },
-              .currentLightDirectionWorld =
-                  [this]() { return currentLightDirectionWorld(); },
-          });
-      const DefaultDebugUIResult uiResult = defaultDebugUi.build();
-      if (uiResult.materialChanged) {
-        sceneModel.syncMaterialParameters();
-      }
-      imguiPass->endFrame();
-      if (debugPass != nullptr) {
-        debugPass->setSelectedOutput(
-            static_cast<uint32_t>(debugUiSettings.presentedOutput));
-      }
-      if (uiResult.iblBakeRequested) {
-        backend.waitIdle();
-        if (debugUiSettings.syncSkySunToLight) {
-          syncProceduralSkySunWithLight();
-        }
-        imageBasedLighting.rebuild(deviceContext(), commandContext(),
-                                   debugUiSettings.iblBakeSettings);
-        renderer.recreate(deviceContext(), swapchainContext());
-      }
-    }
-
-    DefaultDebugCameraController cameraController =
-        DefaultDebugCameraController::create(debugUiSettings);
-    cameraController.update(deltaSeconds, window.handle());
-
-    GeometryUniformData geometryUniformData{};
-
-    geometryUniformData.model = glm::mat4(1.0f);
-    geometryUniformData.model = glm::translate(geometryUniformData.model,
-                                               debugUiSettings.modelPosition);
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.x),
-                    glm::vec3(1.0f, 0.0f, 0.0f));
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.y),
-                    glm::vec3(0.0f, 1.0f, 0.0f));
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.z),
-                    glm::vec3(0.0f, 0.0f, 1.0f));
-    geometryUniformData.model =
-        glm::scale(geometryUniformData.model, debugUiSettings.modelScale);
-    geometryUniformData.modelNormal =
-        glm::transpose(glm::inverse(geometryUniformData.model));
-
-    geometryUniformData.view = glm::lookAt(
-        debugUiSettings.cameraPosition,
-        debugUiSettings.cameraPosition +
-            DefaultDebugCameraController::forwardFromSettings(debugUiSettings),
-        glm::vec3(0.0f, 0.0f, 1.0f));
-
-    geometryUniformData.proj = glm::perspective(
-        glm::radians(45.0f),
-        static_cast<float>(swapchainContext().extent2D().width) /
-            static_cast<float>(swapchainContext().extent2D().height),
-        0.1f, 10.0f);
-
-    // Vulkan inverts Y.
-    geometryUniformData.proj[1][1] *= -1.0f;
-
-    frameGeometryUniforms.write(frameState->frameIndex, geometryUniformData);
-
-    if (pbrPass != nullptr) {
-      glm::vec3 lightDirectionWorld = currentLightDirectionWorld();
-      glm::vec3 lightDirectionView = glm::normalize(
-          glm::mat3(geometryUniformData.view) * lightDirectionWorld);
-
-      pbrPass->setCamera(geometryUniformData.proj, geometryUniformData.view);
-      pbrPass->setDirectionalLight(lightDirectionView,
-                                   debugUiSettings.lightColor *
-                                       debugUiSettings.lightIntensity);
-      pbrPass->setEnvironmentControls(
-          debugUiSettings.environmentRotationRadians,
-          debugUiSettings.environmentIntensity *
-              debugUiSettings.environmentBackgroundWeight,
-          debugUiSettings.environmentIntensity *
-              debugUiSettings.environmentDiffuseWeight,
-          debugUiSettings.environmentIntensity *
-              debugUiSettings.environmentSpecularWeight,
-          debugUiSettings.iblEnabled, debugUiSettings.skyboxVisible);
-      pbrPass->setDielectricSpecularScale(
-          debugUiSettings.dielectricSpecularScale);
-      pbrPass->setDebugView(debugUiSettings.pbrDebugView);
-    }
-    if (tonemapPass != nullptr) {
-      const glm::vec3 lightRadiance =
-          debugUiSettings.lightColor * debugUiSettings.lightIntensity;
-      const float lightLuminance =
-          glm::dot(lightRadiance, glm::vec3(0.2126f, 0.7152f, 0.0722f));
-      const float resolvedExposure =
-          debugUiSettings.autoExposureEnabled
-              ? glm::clamp(debugUiSettings.autoExposureKey /
-                               std::max(lightLuminance, 0.001f),
-                           0.05f, 8.0f)
-              : debugUiSettings.exposure;
-      tonemapPass->setExposure(resolvedExposure);
-      tonemapPass->setWhitePoint(debugUiSettings.whitePoint);
-      tonemapPass->setGamma(debugUiSettings.gamma);
-      tonemapPass->setOperator(debugUiSettings.tonemapOperator);
-    }
-
-    renderer.record(backend.commands().commandBuffer(frameState->frameIndex),
+    renderer.record(commandContext().commandBuffer(frameState->frameIndex),
                     swapchainContext(), renderItems, frameState->frameIndex,
                     frameState->imageIndex);
 
-    bool shouldRecreate = backend.endFrame(*frameState, window);
+    const bool shouldRecreate = backend.endFrame(*frameState, window);
     if (shouldRecreate) {
       backend.recreateSwapchain(window);
       renderer.recreate(deviceContext(), swapchainContext());
     }
   }
-  void mainLopp() {
+
+  void mainLoop() {
     while (!window.shouldClose()) {
       window.pollEvents();
       drawFrame();
     }
+
     backend.waitIdle();
   }
+
   void cleanup() { window.destroy(); }
 };
 
 int main() {
   try {
-    DoublePassApp app;
+    TriangleApp app;
     app.run();
-  } catch (std::exception &e) {
+  } catch (const std::exception &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
   }
+
   return EXIT_SUCCESS;
 }
