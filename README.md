@@ -1,5 +1,5 @@
 <div align="center" style="margin-bottom:10px">
-    <img src="assets/gallery/logo2.jpg" alt="Abstracto logo" style="heigth: 200px" />
+    <img src="assets/gallery/logo2.jpg" alt="Abstracto logo" height="200" />
 </div>
 
 <p align="center">
