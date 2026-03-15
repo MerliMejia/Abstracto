@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -20,37 +21,44 @@ struct SceneLight {
   SceneLightType type = SceneLightType::Directional;
   bool enabled = true;
   glm::vec3 color{1.0f, 1.0f, 1.0f};
-  float intensity = 1.0f;
+  float power = 1.0f;
   glm::vec3 position{0.0f, 0.0f, 0.0f};
   float range = 8.0f;
   glm::vec3 direction{0.0f, -1.0f, 0.0f};
+  float exposure = 0.0f;
+  float radius = 0.25f;
   float innerConeAngleRadians = glm::radians(18.0f);
   float outerConeAngleRadians = glm::radians(28.0f);
 
   static SceneLight
   directional(const std::string &name = "Directional Light",
               glm::vec3 direction = glm::vec3(0.0f, -1.0f, -1.0f),
-              glm::vec3 color = glm::vec3(1.0f), float intensity = 3.0f) {
+              glm::vec3 color = glm::vec3(1.0f), float power = 3.0f,
+              float exposure = 0.0f) {
     SceneLight light;
     light.name = name;
     light.type = SceneLightType::Directional;
     light.direction =
         normalizedOrFallback(direction, glm::vec3(0.0f, -1.0f, -1.0f));
     light.color = color;
-    light.intensity = intensity;
+    light.power = std::max(power, 0.0f);
+    light.exposure = exposure;
     return light;
   }
 
   static SceneLight point(const std::string &name = "Point Light",
                           glm::vec3 position = glm::vec3(0.0f),
                           glm::vec3 color = glm::vec3(1.0f),
-                          float intensity = 12.0f, float range = 8.0f) {
+                          float power = 18.0f, float exposure = 0.0f,
+                          float radius = 0.64f, float range = 25.0f) {
     SceneLight light;
     light.name = name;
     light.type = SceneLightType::Point;
     light.position = position;
     light.color = color;
-    light.intensity = intensity;
+    light.power = std::max(power, 0.0f);
+    light.exposure = exposure;
+    light.radius = std::max(radius, 0.0f);
     light.range = std::max(range, 0.01f);
     return light;
   }
@@ -59,7 +67,8 @@ struct SceneLight {
                          glm::vec3 position = glm::vec3(0.0f),
                          glm::vec3 direction = glm::vec3(0.0f, -1.0f, -1.0f),
                          glm::vec3 color = glm::vec3(1.0f),
-                         float intensity = 18.0f, float range = 10.0f,
+                         float power = 18.0f, float exposure = 0.0f,
+                         float range = 10.0f,
                          float innerConeAngleRadians = glm::radians(18.0f),
                          float outerConeAngleRadians = glm::radians(28.0f)) {
     SceneLight light;
@@ -69,7 +78,8 @@ struct SceneLight {
     light.direction =
         normalizedOrFallback(direction, glm::vec3(0.0f, -1.0f, -1.0f));
     light.color = color;
-    light.intensity = intensity;
+    light.power = std::max(power, 0.0f);
+    light.exposure = exposure;
     light.range = std::max(range, 0.01f);
     light.innerConeAngleRadians =
         std::clamp(innerConeAngleRadians, 0.0f, glm::radians(89.0f));
@@ -81,6 +91,10 @@ struct SceneLight {
 
   void normalizeDirection() {
     direction = normalizedOrFallback(direction, glm::vec3(0.0f, -1.0f, -1.0f));
+  }
+
+  float radianceScale() const {
+    return std::max(power, 0.0f) * std::exp2(exposure);
   }
 
 private:

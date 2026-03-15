@@ -1,0 +1,116 @@
+{
+  "autoExposureEnabled": false,
+  "autoExposureKey": 1.6790000200271606,
+  "cameraFarPlane": 100.0,
+  "cameraLookSensitivity": 0.0035000001080334187,
+  "cameraMoveSpeed": 5.434000015258789,
+  "cameraPitchRadians": -0.1531803011894226,
+  "cameraPosition": [
+    2.290891647338867,
+    8.502569198608398,
+    25.57532501220703
+  ],
+  "cameraYawRadians": -6.2983784675598145,
+  "dielectricSpecularScale": 0.5,
+  "environmentBackgroundWeight": 0.7260000109672546,
+  "environmentDiffuseWeight": 1.0390000343322754,
+  "environmentIntensity": 2.4630000591278076,
+  "environmentRotationRadians": 1.7278759479522705,
+  "environmentSpecularWeight": 1.3919999599456787,
+  "exposure": 1.184999942779541,
+  "gamma": 1.5160000324249268,
+  "iblBakeSettings": {
+    "brdfResolution": 256,
+    "brdfSamples": 128,
+    "environmentHdrPath": "assets/textures/dikhololo_night_4k.hdr",
+    "environmentResolution": 1024,
+    "irradianceResolution": 32,
+    "irradianceSamples": 1024,
+    "prefilteredResolution": 256,
+    "prefilteredSamples": 64,
+    "sky": {
+      "groundColor": [
+        0.10000000149011612,
+        0.09000000357627869,
+        0.07999999821186066
+      ],
+      "groundFalloff": 1.600000023841858,
+      "horizonColor": [
+        0.8500000238418579,
+        0.7200000286102295,
+        0.5799999833106995
+      ],
+      "horizonGlow": 0.2800000011920929,
+      "skyExponent": 0.44999998807907104,
+      "sunAngularRadius": 0.04500000178813934,
+      "sunAzimuthRadians": 0.4266274869441986,
+      "sunColor": [
+        1.0,
+        0.949999988079071,
+        0.8199999928474426
+      ],
+      "sunElevationRadians": 1.0273293256759644,
+      "sunGlow": 2.5,
+      "sunIntensity": 24.0,
+      "zenithColor": [
+        0.1599999964237213,
+        0.3199999928474426,
+        0.7200000286102295
+      ]
+    }
+  },
+  "iblEnabled": true,
+  "lightMarkerScale": 0.5690000057220459,
+  "lightMarkersVisible": true,
+  "modelPosition": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelRotationDegrees": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelScale": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "pbrDebugView": 0,
+  "presentedOutput": 7,
+  "sceneLights": [
+    {
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "direction": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "enabled": true,
+      "exposure": 7.072999954223633,
+      "innerConeAngleRadians": 0.3141592741012573,
+      "name": "Point Light",
+      "outerConeAngleRadians": 0.48869219422340393,
+      "position": [
+        0.0,
+        9.649999618530273,
+        0.0
+      ],
+      "power": 58.099998474121094,
+      "radius": 6.760000228881836,
+      "range": 25.0,
+      "type": 1
+    }
+  ],
+  "selectedLightIndex": 0,
+  "selectedMaterialIndex": 0,
+  "skyboxVisible": true,
+  "syncSkySunToLight": true,
+  "tonemapOperator": 2,
+  "whitePoint": 16.0
+}

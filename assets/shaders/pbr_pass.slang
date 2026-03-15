@@ -17,15 +17,16 @@ struct VSOutput {
 struct PbrLightData {
     float4 positionAndType;
     float4 directionAndRange;
-    float4 colorAndIntensity;
+    float4 colorAndRadiance;
     float4 spotAngles;
 };
 
 struct PbrFrameData {
     float4 projParams;
-    float4 viewRightAndBackground;
-    float4 viewUpAndDiffuse;
-    float4 viewForwardAndSpecular;
+    float4 cameraWorldAndBackground;
+    float4 viewRightAndDiffuse;
+    float4 viewUpAndSpecular;
+    float4 viewForwardAndUnused;
     float4 environmentParams;
     float4 specularTuning;
     uint4 settings;
@@ -102,10 +103,15 @@ float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
 }
 
 float3 ViewToWorld(float3 viewDirection) {
-    float3 right = pbrFrame.viewRightAndBackground.xyz;
-    float3 up = pbrFrame.viewUpAndDiffuse.xyz;
-    float3 forward = pbrFrame.viewForwardAndSpecular.xyz;
+    float3 right = pbrFrame.viewRightAndDiffuse.xyz;
+    float3 up = pbrFrame.viewUpAndSpecular.xyz;
+    float3 forward = pbrFrame.viewForwardAndUnused.xyz;
     return right * viewDirection.x + up * viewDirection.y + forward * (-viewDirection.z);
+}
+
+float3 ReconstructWorldPosition(float2 uv, float depth) {
+    float3 viewPos = ReconstructViewPosition(uv, depth);
+    return pbrFrame.cameraWorldAndBackground.xyz + ViewToWorld(viewPos);
 }
 
 float3 RotateEnvironment(float3 worldDirection) {
@@ -113,9 +119,9 @@ float3 RotateEnvironment(float3 worldDirection) {
     float s = sin(angle);
     float c = cos(angle);
     return normalize(float3(
-        c * worldDirection.x - s * worldDirection.y,
-        s * worldDirection.x + c * worldDirection.y,
-        worldDirection.z));
+        c * worldDirection.x + s * worldDirection.z,
+        worldDirection.y,
+        -s * worldDirection.x + c * worldDirection.z));
 }
 
 float3 SampleEnvironment(float3 worldDirection) {
@@ -128,6 +134,11 @@ float DistanceAttenuation(float distanceToLight, float range) {
     float smoothRange = 1.0 - distanceRatio * distanceRatio;
     smoothRange *= smoothRange;
     return smoothRange / max(distanceToLight * distanceToLight, 1e-3);
+}
+
+float PointLightAttenuation(float distanceToLight, float radius, float range) {
+    float effectiveDistance = max(distanceToLight, max(radius, 1e-3));
+    return DistanceAttenuation(effectiveDistance, range);
 }
 
 float SpotAttenuation(float3 lightToSurfaceDirection, float3 lightDirection,
@@ -151,7 +162,7 @@ float4 fragMain(VSOutput input) : SV_TARGET {
         -1.0));
     float3 fallbackWorld = normalize(ViewToWorld(fallbackView));
     backgroundColor =
-        SampleEnvironment(fallbackWorld) * pbrFrame.viewRightAndBackground.w;
+        SampleEnvironment(fallbackWorld) * pbrFrame.cameraWorldAndBackground.w;
 
     if (depth >= 0.9999) {
         if (pbrFrame.settings.y == 6) {
@@ -163,7 +174,7 @@ float4 fragMain(VSOutput input) : SV_TARGET {
 
     float4 albedoSample = gbufferAlbedo.Sample(input.uv);
     float3 albedo = albedoSample.rgb;
-    float3 normal = DecodeNormal(gbufferNormal.Sample(input.uv).rgb);
+    float3 worldNormal = DecodeNormal(gbufferNormal.Sample(input.uv).rgb);
     float3 material = gbufferMaterial.Sample(input.uv).rgb;
     float3 emissive = gbufferEmissive.Sample(input.uv).rgb;
 
@@ -171,12 +182,12 @@ float4 fragMain(VSOutput input) : SV_TARGET {
     float roughness = clamp(material.g, 0.045, 1.0);
     float ao = saturate(material.b);
 
-    float3 viewPos = ReconstructViewPosition(input.uv, depth);
-    float3 V = normalize(-viewPos);
+    float3 worldPos = ReconstructWorldPosition(input.uv, depth);
+    float3 V = normalize(pbrFrame.cameraWorldAndBackground.xyz - worldPos);
 
     float dielectricF0 = 0.04 * pbrFrame.specularTuning.x;
     float3 F0 = lerp(float3(dielectricF0, dielectricF0, dielectricF0), albedo, metallic);
-    float NdotV = max(dot(normal, V), 0.0);
+    float NdotV = max(dot(worldNormal, V), 0.0);
     float3 directLighting = 0.0.xxx;
     float3 ambientDiffuse = 0.0.xxx;
     float3 ambientSpecular = 0.0.xxx;
@@ -186,24 +197,27 @@ float4 fragMain(VSOutput input) : SV_TARGET {
     for (uint lightIndex = 0; lightIndex < lightCount; ++lightIndex) {
         PbrLightData light = pbrFrame.lights[lightIndex];
         uint lightType = (uint)(light.positionAndType.w + 0.5);
-        float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w;
+        float3 radiance = light.colorAndRadiance.rgb * light.colorAndRadiance.w;
         float3 L = 0.0.xxx;
         float attenuation = 1.0;
 
         if (lightType == PBR_LIGHT_TYPE_DIRECTIONAL) {
             L = normalize(-light.directionAndRange.xyz);
         } else {
-            float3 toLight = light.positionAndType.xyz - viewPos;
+            float3 toLight = light.positionAndType.xyz - worldPos;
             float distanceToLight = length(toLight);
-            if (distanceToLight >= light.directionAndRange.w) {
-                continue;
-            }
-
             L = toLight / max(distanceToLight, 1e-4);
-            attenuation = DistanceAttenuation(distanceToLight,
-                                              light.directionAndRange.w);
+            if (lightType == PBR_LIGHT_TYPE_POINT) {
+                attenuation = PointLightAttenuation(distanceToLight,
+                                                    light.spotAngles.z,
+                                                    light.directionAndRange.w);
+            } else {
+                if (distanceToLight >= light.directionAndRange.w) {
+                    continue;
+                }
 
-            if (lightType == PBR_LIGHT_TYPE_SPOT) {
+                attenuation = DistanceAttenuation(distanceToLight,
+                                                  light.directionAndRange.w);
                 float3 lightToSurfaceDirection = -L;
                 attenuation *= SpotAttenuation(lightToSurfaceDirection,
                                                light.directionAndRange.xyz,
@@ -216,9 +230,9 @@ float4 fragMain(VSOutput input) : SV_TARGET {
 
         float3 H = normalize(V + L);
         float3 directF = FresnelSchlick(max(dot(H, V), 0.0), F0);
-        float NDF = DistributionGGX(normal, H, roughness);
-        float G = GeometrySmith(normal, V, L, roughness);
-        float NdotL = max(dot(normal, L), 0.0);
+        float NDF = DistributionGGX(worldNormal, H, roughness);
+        float G = GeometrySmith(worldNormal, V, L, roughness);
+        float NdotL = max(dot(worldNormal, L), 0.0);
         if (NdotL <= 1e-4) {
             continue;
         }
@@ -233,8 +247,7 @@ float4 fragMain(VSOutput input) : SV_TARGET {
     }
 
     if (enableIbl) {
-        float3 worldNormal = normalize(ViewToWorld(normal));
-        float3 worldView = normalize(ViewToWorld(V));
+        float3 worldView = V;
         float3 worldReflection = normalize(reflect(-worldView, worldNormal));
         float3 rotatedNormal = RotateEnvironment(worldNormal);
         float3 rotatedReflection = RotateEnvironment(worldReflection);
@@ -254,9 +267,9 @@ float4 fragMain(VSOutput input) : SV_TARGET {
             prefilteredColor * (iblF * envBrdf.x + envBrdf.y);
 
         ambientDiffuse =
-            iblKd * diffuseIbl * ao * pbrFrame.viewUpAndDiffuse.w;
+            iblKd * diffuseIbl * ao * pbrFrame.viewRightAndDiffuse.w;
         ambientSpecular =
-            specularIbl * ao * pbrFrame.viewForwardAndSpecular.w;
+            specularIbl * ao * pbrFrame.viewUpAndSpecular.w;
         reflections = prefilteredColor;
     }
 

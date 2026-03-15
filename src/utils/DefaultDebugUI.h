@@ -48,7 +48,7 @@ struct DefaultDebugUISettings {
   float environmentBackgroundWeight = 1.0f;
   float environmentDiffuseWeight = 0.85f;
   float environmentSpecularWeight = 1.35f;
-  float dielectricSpecularScale = 2.4f;
+  float dielectricSpecularScale = 1.0f;
   float environmentRotationRadians = 0.0f;
   bool iblEnabled = false;
   bool skyboxVisible = false;
@@ -58,11 +58,10 @@ struct DefaultDebugUISettings {
   glm::vec3 modelPosition = {0.0f, 0.0f, 0.0f};
   glm::vec3 modelRotationDegrees = {0.0f, 0.0f, 0.0f};
   glm::vec3 modelScale = {1.0f, 1.0f, 1.0f};
-  bool smoothGltfNormalsEnabled = false;
 
-  glm::vec3 cameraPosition = {2.7f, 2.7f, 1.1f};
-  float cameraYawRadians = glm::radians(-135.0f);
-  float cameraPitchRadians = glm::radians(-11.1f);
+  glm::vec3 cameraPosition = {0.0f, 1.4f, 4.5f};
+  float cameraYawRadians = glm::radians(180.0f);
+  float cameraPitchRadians = glm::radians(-12.0f);
   float cameraMoveSpeed = 2.5f;
   float cameraLookSensitivity = 0.0035f;
   float cameraFarPlane = 100.0f;
@@ -87,18 +86,18 @@ public:
   }
 
   void reset() {
-    settings.cameraPosition = {2.7f, 2.7f, 1.1f};
-    settings.cameraYawRadians = glm::radians(-135.0f);
-    settings.cameraPitchRadians = glm::radians(-11.1f);
+    settings.cameraPosition = {0.0f, 1.4f, 4.5f};
+    settings.cameraYawRadians = glm::radians(180.0f);
+    settings.cameraPitchRadians = glm::radians(-12.0f);
     settings.cameraFarPlane = 100.0f;
     settings.cameraLookActive = false;
   }
 
   static glm::vec3 forwardFromAngles(float yawRadians, float pitchRadians) {
     const float cosPitch = std::cos(pitchRadians);
-    return glm::normalize(glm::vec3(std::cos(yawRadians) * cosPitch,
-                                    std::sin(yawRadians) * cosPitch,
-                                    std::sin(pitchRadians)));
+    return glm::normalize(glm::vec3(std::sin(yawRadians) * cosPitch,
+                                    std::sin(pitchRadians),
+                                    -std::cos(yawRadians) * cosPitch));
   }
 
   static glm::vec3 forwardFromSettings(const DefaultDebugUISettings &settings) {
@@ -127,7 +126,7 @@ public:
         settings.cameraLastCursorX = cursorX;
         settings.cameraLastCursorY = cursorY;
 
-        settings.cameraYawRadians -=
+        settings.cameraYawRadians +=
             static_cast<float>(deltaX) * settings.cameraLookSensitivity;
         settings.cameraPitchRadians -=
             static_cast<float>(deltaY) * settings.cameraLookSensitivity;
@@ -144,7 +143,7 @@ public:
     }
 
     const glm::vec3 forward = currentForward();
-    const glm::vec3 worldUp(0.0f, 0.0f, 1.0f);
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
     const glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
     const glm::vec3 up = glm::normalize(glm::cross(right, forward));
     const float moveStep = settings.cameraMoveSpeed * deltaSeconds;
@@ -176,6 +175,9 @@ private:
 struct DefaultDebugUIResult {
   bool materialChanged = false;
   bool iblBakeRequested = false;
+  bool saveSessionRequested = false;
+  bool reloadSessionRequested = false;
+  bool resetSessionRequested = false;
 };
 
 struct DefaultDebugUIPerformanceStats {
@@ -211,6 +213,7 @@ public:
     DefaultDebugUIResult result;
     result.materialChanged = buildMaterialEditorUi();
     buildPerformanceUi();
+    buildSessionUi(result);
     buildCameraUi();
     buildTransformUi();
     buildLightsUi();
@@ -292,8 +295,6 @@ private:
         ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
     materialChanged |=
         ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
-    materialChanged |=
-        ImGui::SliderFloat("Normal Scale", &material.normalScale, 0.0f, 2.0f);
     materialChanged |= ImGui::SliderFloat(
         "Occlusion Strength", &material.occlusionStrength, 0.0f, 1.0f);
 
@@ -310,11 +311,6 @@ private:
                 material.metallicRoughnessTexture.hasEmbeddedRgba()
             ? "yes"
             : "no");
-    ImGui::BulletText("Normal: %s",
-                      material.normalTexture.hasPath() ||
-                              material.normalTexture.hasEmbeddedRgba()
-                          ? "yes"
-                          : "no");
     ImGui::BulletText("Emissive: %s",
                       material.emissiveTexture.hasPath() ||
                               material.emissiveTexture.hasEmbeddedRgba()
@@ -384,7 +380,9 @@ private:
     ImGui::Text("Type: %s", lightTypeLabel(light.type));
     ImGui::Checkbox("Enabled", &light.enabled);
     ImGui::ColorEdit3("Color", &light.color.x);
-    ImGui::SliderFloat("Intensity", &light.intensity, 0.0f, 50.0f);
+    ImGui::DragFloat("Power", &light.power, 0.1f, 0.0f, 10000.0f, "%.3f");
+    light.power = std::max(light.power, 0.0f);
+    ImGui::SliderFloat("Exposure", &light.exposure, -16.0f, 16.0f, "%.3f");
 
     if (light.type == SceneLightType::Directional) {
       ImGui::BeginDisabled();
@@ -417,11 +415,16 @@ private:
         light.type == SceneLightType::Spot) {
       ImGui::SeparatorText("Transform");
       ImGui::DragFloat3("Position", &light.position.x, 0.05f);
-      ImGui::SliderFloat("Range", &light.range, 0.5f, 25.0f);
-      light.range = std::max(light.range, 0.01f);
+    }
+
+    if (light.type == SceneLightType::Point) {
+      ImGui::DragFloat("Radius", &light.radius, 0.01f, 0.0f, 25.0f, "%.3f m");
+      light.radius = std::max(light.radius, 0.0f);
     }
 
     if (light.type == SceneLightType::Spot) {
+      ImGui::SliderFloat("Range", &light.range, 0.5f, 25.0f);
+      light.range = std::max(light.range, 0.01f);
       float innerDegrees = glm::degrees(light.innerConeAngleRadians);
       float outerDegrees = glm::degrees(light.outerConeAngleRadians);
       if (ImGui::SliderFloat("Inner Cone", &innerDegrees, 1.0f, 85.0f)) {
@@ -505,8 +508,6 @@ private:
     ImGui::SliderFloat3("Rotation", &settings.modelRotationDegrees.x, -180.0f,
                         180.0f);
     ImGui::DragFloat3("Scale", &settings.modelScale.x, 0.1f, 0.01f, 200.0f);
-    ImGui::Separator();
-    ImGui::Checkbox("Smooth glTF Normals", &settings.smoothGltfNormalsEnabled);
     if (ImGui::Button("Reload Model")) {
       bindings.callbacks.reloadSceneModel();
     }
@@ -539,6 +540,22 @@ private:
     ImGui::Text("FPS: %.1f", performanceStats.fps);
     ImGui::SameLine(0.0f, 16.0f);
     ImGui::Text("Frame Time: %.2f ms", performanceStats.frameTimeMs);
+    ImGui::End();
+  }
+
+  void buildSessionUi(DefaultDebugUIResult &result) {
+    ImGui::Begin("Session");
+    if (ImGui::Button("Save Current")) {
+      result.saveSessionRequested = true;
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    if (ImGui::Button("Reload From Disk")) {
+      result.reloadSessionRequested = true;
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    if (ImGui::Button("Reset To Defaults")) {
+      result.resetSessionRequested = true;
+    }
     ImGui::End();
   }
 

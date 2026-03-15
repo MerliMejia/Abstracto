@@ -14,6 +14,7 @@
 #include "renderer/PassRenderer.h"
 #include "renderer/PipelineSpec.h"
 #include "renderer/RenderPass.h"
+#include "utils/DebugSessionIO.h"
 #include "utils/DefaultDebugUI.h"
 #include "vulkan/vulkan.hpp"
 #include <algorithm>
@@ -21,6 +22,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <memory>
@@ -31,10 +33,13 @@ constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
 constexpr float CAMERA_NEAR_PLANE = 0.1f;
 const std::string ASSET_PATH = "assets";
+const std::filesystem::path DEBUG_SESSION_PATH =
+    std::filesystem::path(ASSET_PATH) / "debug" / "last_session.json";
 
 class DefaultExampleApp {
 public:
   void run() {
+    loadDebugSessionFromDisk();
     initWindow();
     initVulkan();
     mainLopp();
@@ -85,7 +90,14 @@ private:
   }
 
   std::string sceneModelPath() const {
-    return ASSET_PATH + "/models/material_test.glb";
+    return ASSET_PATH + "/models/night.glb";
+  }
+
+  void ensureDefaultEnvironmentPath() {
+    if (debugUiSettings.iblBakeSettings.environmentHdrPath.empty()) {
+      debugUiSettings.iblBakeSettings.environmentHdrPath =
+          ASSET_PATH + "/textures/dikhololo_night_4k.hdr";
+    }
   }
 
   void rebuildSceneRenderItems() {
@@ -103,8 +115,6 @@ private:
 
   void reloadSceneModel() {
     backend.waitIdle();
-    sceneModel.setSmoothGltfNormalsEnabled(
-        debugUiSettings.smoothGltfNormalsEnabled);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
                             renderer.descriptorSetLayout(),
                             frameGeometryUniforms, sampler,
@@ -112,10 +122,38 @@ private:
     rebuildSceneRenderItems();
   }
 
+  void loadDebugSessionFromDisk() {
+    try {
+      DebugSessionIO::loadDebugSession(DEBUG_SESSION_PATH, debugUiSettings);
+      ensureDefaultEnvironmentPath();
+    } catch (const std::exception &e) {
+      std::cerr << "Failed to load debug session: " << e.what() << std::endl;
+    }
+  }
+
+  void saveDebugSessionToDisk() const {
+    if (!DebugSessionIO::saveDebugSession(DEBUG_SESSION_PATH,
+                                          debugUiSettings)) {
+      std::cerr << "Failed to save debug session to "
+                << DEBUG_SESSION_PATH.string() << std::endl;
+    }
+  }
+
+  void applyLoadedDebugSettings() {
+    ensureDefaultEnvironmentPath();
+    backend.waitIdle();
+    if (debugUiSettings.syncSkySunToLight) {
+      syncProceduralSkySunWithLight();
+    }
+    imageBasedLighting.rebuild(deviceContext(), commandContext(),
+                               debugUiSettings.iblBakeSettings);
+    renderer.recreate(deviceContext(), swapchainContext());
+    reloadSceneModel();
+  }
+
   void initVulkan() {
     backend.initialize(window, config);
-    debugUiSettings.iblBakeSettings.environmentHdrPath =
-        ASSET_PATH + "/textures/dikhololo_night_4k.hdr";
+    ensureDefaultEnvironmentPath();
 
     sampler.create(deviceContext());
 
@@ -206,8 +244,6 @@ private:
     renderer.initialize(deviceContext(), swapchainContext());
 
     frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
-    sceneModel.setSmoothGltfNormalsEnabled(
-        debugUiSettings.smoothGltfNormalsEnabled);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
                             renderer.descriptorSetLayout(),
                             frameGeometryUniforms, sampler,
@@ -232,7 +268,7 @@ private:
       if (!light.enabled) {
         continue;
       }
-      radiance += light.color * std::max(light.intensity, 0.0f);
+      radiance += light.color * light.radianceScale();
     }
     return radiance;
   }
@@ -278,6 +314,17 @@ private:
         sceneModel.syncMaterialParameters();
       }
       imguiPass->endFrame();
+      if (uiResult.saveSessionRequested) {
+        saveDebugSessionToDisk();
+      }
+      if (uiResult.reloadSessionRequested) {
+        loadDebugSessionFromDisk();
+        applyLoadedDebugSettings();
+      }
+      if (uiResult.resetSessionRequested) {
+        debugUiSettings = DefaultDebugUISettings{};
+        applyLoadedDebugSettings();
+      }
       if (debugPresentPass != nullptr) {
         debugPresentPass->setSelectedOutput(
             static_cast<uint32_t>(debugUiSettings.presentedOutput));
@@ -325,7 +372,7 @@ private:
         debugUiSettings.cameraPosition,
         debugUiSettings.cameraPosition +
             DefaultDebugCameraController::forwardFromSettings(debugUiSettings),
-        glm::vec3(0.0f, 0.0f, 1.0f));
+        glm::vec3(0.0f, 1.0f, 0.0f));
 
     geometryUniformData.proj = glm::perspective(
         glm::radians(45.0f),

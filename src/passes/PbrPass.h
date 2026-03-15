@@ -30,15 +30,16 @@ struct PbrLightUniformData {
   glm::vec4 positionAndType{0.0f, 0.0f, 0.0f,
                             static_cast<float>(SceneLightType::Directional)};
   glm::vec4 directionAndRange{0.0f, -1.0f, 0.0f, 1.0f};
-  glm::vec4 colorAndIntensity{1.0f, 1.0f, 1.0f, 1.0f};
+  glm::vec4 colorAndRadiance{1.0f, 1.0f, 1.0f, 1.0f};
   glm::vec4 spotAngles{1.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct PbrPassUniformData {
   glm::vec4 projParams{1.0f, -1.0f, -1.0f, -0.1f};
-  glm::vec4 viewRightAndBackground{1.0f, 0.0f, 0.0f, 1.0f};
-  glm::vec4 viewUpAndDiffuse{0.0f, 1.0f, 0.0f, 1.0f};
-  glm::vec4 viewForwardAndSpecular{0.0f, 0.0f, -1.0f, 1.0f};
+  glm::vec4 cameraWorldAndBackground{0.0f, 0.0f, 0.0f, 1.0f};
+  glm::vec4 viewRightAndDiffuse{1.0f, 0.0f, 0.0f, 1.0f};
+  glm::vec4 viewUpAndSpecular{0.0f, 1.0f, 0.0f, 1.0f};
+  glm::vec4 viewForwardAndUnused{0.0f, 0.0f, -1.0f, 0.0f};
   glm::vec4 environmentParams{0.0f, 0.0f, 0.0f, 0.0f};
   glm::vec4 specularTuning{2.0f, 0.0f, 0.0f, 0.0f};
   alignas(16) glm::uvec4 settings{0u, 0u, 0u, 0u};
@@ -77,19 +78,20 @@ public:
   }
 
   void setCamera(const glm::mat4 &proj, const glm::mat4 &view) {
-    viewMatrix = view;
     uniformData.projParams =
         glm::vec4(proj[0][0], proj[1][1], proj[2][2], proj[3][2]);
 
     const glm::mat4 invView = glm::inverse(view);
-    uniformData.viewRightAndBackground =
+    uniformData.cameraWorldAndBackground =
+        glm::vec4(glm::vec3(invView[3]), uniformData.cameraWorldAndBackground.w);
+    uniformData.viewRightAndDiffuse =
         glm::vec4(glm::normalize(glm::vec3(invView[0])),
-                  uniformData.viewRightAndBackground.w);
-    uniformData.viewUpAndDiffuse = glm::vec4(
-        glm::normalize(glm::vec3(invView[1])), uniformData.viewUpAndDiffuse.w);
-    uniformData.viewForwardAndSpecular =
+                  uniformData.viewRightAndDiffuse.w);
+    uniformData.viewUpAndSpecular = glm::vec4(
+        glm::normalize(glm::vec3(invView[1])), uniformData.viewUpAndSpecular.w);
+    uniformData.viewForwardAndUnused =
         glm::vec4(glm::normalize(-glm::vec3(invView[2])),
-                  uniformData.viewForwardAndSpecular.w);
+                  uniformData.viewForwardAndUnused.w);
   }
 
   void setSceneLights(const SceneLightSet &sceneLights) {
@@ -104,18 +106,16 @@ public:
       }
 
       auto &lightUniform = uniformData.lights[lightCount];
-      const glm::vec3 directionView =
-          glm::normalize(glm::mat3(viewMatrix) * light.direction);
       lightUniform.directionAndRange =
-          glm::vec4(directionView, std::max(light.range, 0.01f));
-      lightUniform.colorAndIntensity =
-          glm::vec4(light.color, std::max(light.intensity, 0.0f));
+          glm::vec4(glm::normalize(light.direction), std::max(light.range, 0.01f));
+      lightUniform.colorAndRadiance =
+          glm::vec4(light.color, light.radianceScale());
       lightUniform.positionAndType =
-          glm::vec4(glm::vec3(viewMatrix * glm::vec4(light.position, 1.0f)),
-                    static_cast<float>(light.type));
+          glm::vec4(light.position, static_cast<float>(light.type));
       lightUniform.spotAngles =
           glm::vec4(std::cos(light.innerConeAngleRadians),
-                    std::cos(light.outerConeAngleRadians), 0.0f, 0.0f);
+                    std::cos(light.outerConeAngleRadians),
+                    std::max(light.radius, 0.0f), 0.0f);
       ++lightCount;
     }
 
@@ -126,9 +126,9 @@ public:
                               float backgroundIntensity, float diffuseIntensity,
                               float specularIntensity, bool enableIbl,
                               bool showBackground) {
-    uniformData.viewRightAndBackground.w = backgroundIntensity;
-    uniformData.viewUpAndDiffuse.w = diffuseIntensity;
-    uniformData.viewForwardAndSpecular.w = specularIntensity;
+    uniformData.cameraWorldAndBackground.w = backgroundIntensity;
+    uniformData.viewRightAndDiffuse.w = diffuseIntensity;
+    uniformData.viewUpAndSpecular.w = specularIntensity;
     uniformData.environmentParams.x = environmentRotationRadians;
 
     uint32_t flags = 0;
@@ -212,7 +212,6 @@ protected:
 private:
   const GeometryPass *sourcePassRef = nullptr;
   const ImageBasedLighting *ibl = nullptr;
-  glm::mat4 viewMatrix{1.0f};
   PbrPassUniformData uniformData{};
   PassUniformSet<PbrPassUniformData> lightUniformSet;
 
