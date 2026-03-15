@@ -8,6 +8,9 @@
 
 struct DebugPassPushConstant {
   uint32_t selectedOutput = 0;
+  float nearPlane = 0.1f;
+  float farPlane = 100.0f;
+  float padding = 0.0f;
 };
 
 class DebugPass : public FullscreenRenderPass {
@@ -40,6 +43,11 @@ public:
   }
 
   void setSelectedOutput(uint32_t index) { selectedOutput = index; }
+
+  void setClipPlanes(float nearPlaneValue, float farPlaneValue) {
+    nearPlane = nearPlaneValue;
+    farPlane = farPlaneValue;
+  }
 
 protected:
   std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
@@ -94,6 +102,8 @@ protected:
   void bindAdditionalPassResources(const RenderPassContext &context) override {
     DebugPassPushConstant push{};
     push.selectedOutput = selectedOutput;
+    push.nearPlane = nearPlane;
+    push.farPlane = farPlane;
 
     context.commandBuffer.pushConstants<DebugPassPushConstant>(
         *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eFragment, 0, {push});
@@ -104,6 +114,8 @@ private:
   const RasterRenderPass *lightPassRef = nullptr;
   const RasterRenderPass *tonemapPassRef = nullptr;
   uint32_t selectedOutput = 0;
+  float nearPlane = 0.1f;
+  float farPlane = 100.0f;
 
   void validateSourcePass() const {
     if (sourcePassRef == nullptr) {

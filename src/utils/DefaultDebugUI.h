@@ -62,6 +62,7 @@ struct DefaultDebugUISettings {
   float cameraPitchRadians = glm::radians(-11.1f);
   float cameraMoveSpeed = 2.5f;
   float cameraLookSensitivity = 0.0035f;
+  float cameraFarPlane = 100.0f;
   bool cameraLookActive = false;
   double cameraLastCursorX = 0.0;
   double cameraLastCursorY = 0.0;
@@ -86,6 +87,7 @@ public:
     settings.cameraPosition = {2.7f, 2.7f, 1.1f};
     settings.cameraYawRadians = glm::radians(-135.0f);
     settings.cameraPitchRadians = glm::radians(-11.1f);
+    settings.cameraFarPlane = 100.0f;
     settings.cameraLookActive = false;
   }
 
@@ -190,11 +192,10 @@ public:
   explicit DefaultDebugUI(DefaultDebugUIBindings bindings)
       : bindings(std::move(bindings)) {}
 
-  static DefaultDebugUI create(RenderableModel &sceneModel,
-                               DefaultDebugUISettings &settings,
-                               DefaultDebugUICallbacks callbacks,
-                               DefaultDebugUIPerformanceStats performanceStats =
-                                   {}) {
+  static DefaultDebugUI
+  create(RenderableModel &sceneModel, DefaultDebugUISettings &settings,
+         DefaultDebugUICallbacks callbacks,
+         DefaultDebugUIPerformanceStats performanceStats = {}) {
     return DefaultDebugUI(DefaultDebugUIBindings{
         .sceneModel = sceneModel,
         .settings = settings,
@@ -384,6 +385,8 @@ private:
     ImGui::SliderFloat("Move Speed", &settings.cameraMoveSpeed, 0.5f, 10.0f);
     ImGui::SliderFloat("Look Sensitivity", &settings.cameraLookSensitivity,
                        0.001f, 0.01f);
+    ImGui::SliderFloat("Far Clip", &settings.cameraFarPlane, 10.0f, 500.0f,
+                       "%.1f");
     if (ImGui::Button("Reset Camera")) {
       cameraController.reset();
     }

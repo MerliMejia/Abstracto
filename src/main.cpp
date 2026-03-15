@@ -27,6 +27,7 @@ constexpr uint32_t WIDTH = 1280;
 constexpr uint32_t HEIGHT = 720;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
+constexpr float CAMERA_NEAR_PLANE = 0.1f;
 const std::string ASSET_PATH = "assets";
 
 class DefaultExampleApp {
@@ -78,7 +79,7 @@ private:
   }
 
   std::string sceneModelPath() const {
-    return ASSET_PATH + "/models/material_test.glb";
+    return ASSET_PATH + "/models/night.glb";
   }
 
   void rebuildSceneRenderItems() {
@@ -108,7 +109,7 @@ private:
   void initVulkan() {
     backend.initialize(window, config);
     debugUiSettings.iblBakeSettings.environmentHdrPath =
-        ASSET_PATH + "/textures/skybox.hdr";
+        ASSET_PATH + "/textures/dikhololo_night_4k.hdr";
 
     sampler.create(deviceContext());
 
@@ -118,7 +119,7 @@ private:
 
     auto geometryPassLocal = std::make_unique<GeometryPass>(
         PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/geometry_pass.spv",
-                     .cullMode = vk::CullModeFlagBits::eBack,
+                     .cullMode = vk::CullModeFlagBits::eNone,
                      .frontFace = vk::FrontFace::eCounterClockwise});
     auto *geometryPassPtr = geometryPassLocal.get();
     geometryPass = geometryPassPtr;
@@ -155,6 +156,7 @@ private:
     debugPass = debugPassLocal.get();
     debugPass->setSelectedOutput(
         static_cast<uint32_t>(debugUiSettings.presentedOutput));
+    debugPass->setClipPlanes(CAMERA_NEAR_PLANE, debugUiSettings.cameraFarPlane);
     renderer.addPass(std::move(debugPassLocal));
 
     auto imguiPassLocal = std::make_unique<ImGuiPass>(
@@ -226,6 +228,8 @@ private:
       if (debugPass != nullptr) {
         debugPass->setSelectedOutput(
             static_cast<uint32_t>(debugUiSettings.presentedOutput));
+        debugPass->setClipPlanes(CAMERA_NEAR_PLANE,
+                                 debugUiSettings.cameraFarPlane);
       }
       if (uiResult.iblBakeRequested) {
         backend.waitIdle();
@@ -274,7 +278,7 @@ private:
         glm::radians(45.0f),
         static_cast<float>(swapchainContext().extent2D().width) /
             static_cast<float>(swapchainContext().extent2D().height),
-        0.1f, 10.0f);
+        CAMERA_NEAR_PLANE, debugUiSettings.cameraFarPlane);
 
     // Vulkan inverts Y.
     geometryUniformData.proj[1][1] *= -1.0f;

@@ -10,6 +10,9 @@ struct VSOutput {
 
 struct DebugPushConstant {
     uint selectedOutput;
+    float nearPlane;
+    float farPlane;
+    float padding;
 };
 
 float LinearizeDepth(float depth, float nearPlane, float farPlane) {
@@ -57,8 +60,9 @@ float4 fragMain(VSOutput input) : SV_TARGET {
 
     if (debugPush.selectedOutput == 4) {
         float depth = gbufferDepth.Sample(input.uv).r;
-        float linearDepth = LinearizeDepth(depth, 0.1, 10.0);
-        float normalized = saturate(linearDepth / 10.0);
+        float linearDepth = LinearizeDepth(depth, debugPush.nearPlane,
+                                           debugPush.farPlane);
+        float normalized = saturate(linearDepth / debugPush.farPlane);
         return float4(normalized.xxx, 1.0);
     }
 
