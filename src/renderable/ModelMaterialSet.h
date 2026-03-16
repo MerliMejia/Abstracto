@@ -55,7 +55,6 @@ private:
   struct MaterialResource {
     Texture baseColorTexture;
     Texture metallicRoughnessTexture;
-    Texture normalTexture;
     Texture emissiveTexture;
     Texture occlusionTexture;
     DescriptorBindings bindings;
@@ -74,11 +73,6 @@ private:
       const ModelMaterialData::TextureSource &textureSource) {
     return textureSource.hasPath() &&
            std::filesystem::exists(textureSource.resolvedPath);
-  }
-
-  static bool hasTextureSource(
-      const ModelMaterialData::TextureSource &textureSource) {
-    return hasAvailableTexture(textureSource) || textureSource.hasEmbeddedRgba();
   }
 
   static void createTextureFromSource(
@@ -104,13 +98,11 @@ private:
 
   static MaterialUniformData
   buildMaterialUniform(const ModelMaterialData &material) {
-    const float normalScale =
-        hasTextureSource(material.normalTexture) ? material.normalScale : 0.0f;
     return MaterialUniformData{
         .baseColorFactor = material.baseColorFactor,
         .emissiveFactor = glm::vec4(material.emissiveFactor, 1.0f),
         .surfaceParams = {material.metallicFactor, material.roughnessFactor,
-                          normalScale, material.occlusionStrength},
+                          0.0f, material.occlusionStrength},
     };
   }
 
@@ -132,10 +124,6 @@ private:
                             resolvedMaterial.metallicRoughnessTexture,
                             {255, 255, 255, 255}, TextureEncoding::Linear,
                             commandContext, deviceContext);
-    createTextureFromSource(resource.normalTexture,
-                            resolvedMaterial.normalTexture,
-                            {128, 128, 255, 255}, TextureEncoding::Linear,
-                            commandContext, deviceContext);
     createTextureFromSource(resource.emissiveTexture,
                             resolvedMaterial.emissiveTexture,
                             {255, 255, 255, 255}, TextureEncoding::Srgb,
@@ -150,8 +138,8 @@ private:
     resource.bindings.create(
         deviceContext, descriptorSetLayout, frameGeometryUniforms,
         resource.baseColorTexture, resource.metallicRoughnessTexture,
-        resource.normalTexture, resource.emissiveTexture,
-        resource.occlusionTexture, sampler, materialUniform, framesInFlight);
+        resource.emissiveTexture, resource.occlusionTexture, sampler,
+        materialUniform, framesInFlight);
   }
 
   MaterialResource defaultMaterialResource;

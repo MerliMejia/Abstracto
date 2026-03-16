@@ -46,6 +46,8 @@ protected:
 
   virtual void bindAdditionalPassResources(const RenderPassContext &context) {}
 
+  uint32_t framesInFlight() const { return framesInFlightCount; }
+
 private:
   uint32_t framesInFlightCount = 0;
   Sampler sampler;

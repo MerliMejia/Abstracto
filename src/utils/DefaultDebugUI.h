@@ -4,9 +4,12 @@
 #include "../passes/TonemapPass.h"
 #include "../renderable/ImageBasedLightingTypes.h"
 #include "../renderable/RenderableModel.h"
+#include "../renderable/SceneLightSet.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <utility>
 
 #include <GLFW/glfw3.h>
@@ -22,17 +25,25 @@ enum class PresentedOutput : uint32_t {
   GeometryPass = 5,
   PbrPass = 6,
   TonemapPass = 7,
+  DirectionalShadow = 8,
+  SpotShadow0 = 9,
+  SpotShadow1 = 10,
+  SpotShadow2 = 11,
 };
 
 struct DefaultDebugUISettings {
-  PresentedOutput presentedOutput = PresentedOutput::TonemapPass;
+  PresentedOutput presentedOutput = PresentedOutput::PbrPass;
   PbrDebugView pbrDebugView = PbrDebugView::Final;
   int selectedMaterialIndex = 0;
+  int selectedLightIndex = 0;
 
-  float lightAzimuthRadians = glm::radians(-129.316f);
-  float lightElevationRadians = glm::radians(-39.011f);
-  float lightIntensity = 13.263f;
-  glm::vec3 lightColor = {1.0f, 242.0f / 255.0f, 230.0f / 255.0f};
+  SceneLightSet sceneLights = SceneLightSet::showcaseLights();
+  bool lightMarkersVisible = true;
+  float lightMarkerScale = 0.35f;
+  bool shadowsEnabled = true;
+  float directionalShadowExtent = 12.0f;
+  float directionalShadowNearPlane = 0.1f;
+  float directionalShadowFarPlane = 24.0f;
 
   float exposure = 1.0f;
   float autoExposureKey = 2.5f;
@@ -45,23 +56,23 @@ struct DefaultDebugUISettings {
   float environmentBackgroundWeight = 1.0f;
   float environmentDiffuseWeight = 0.85f;
   float environmentSpecularWeight = 1.35f;
-  float dielectricSpecularScale = 2.4f;
+  float dielectricSpecularScale = 1.0f;
   float environmentRotationRadians = 0.0f;
-  bool iblEnabled = true;
-  bool skyboxVisible = true;
+  bool iblEnabled = false;
+  bool skyboxVisible = false;
   bool syncSkySunToLight = true;
   ImageBasedLightingBakeSettings iblBakeSettings{};
 
   glm::vec3 modelPosition = {0.0f, 0.0f, 0.0f};
-  glm::vec3 modelRotationDegrees = {90.0f, 180.0f, 0.0f};
-  glm::vec3 modelScale = {0.5f, 0.5f, 0.5f};
-  bool smoothGltfNormalsEnabled = false;
+  glm::vec3 modelRotationDegrees = {0.0f, 0.0f, 0.0f};
+  glm::vec3 modelScale = {1.0f, 1.0f, 1.0f};
 
-  glm::vec3 cameraPosition = {2.7f, 2.7f, 1.1f};
-  float cameraYawRadians = glm::radians(-135.0f);
-  float cameraPitchRadians = glm::radians(-11.1f);
+  glm::vec3 cameraPosition = {0.0f, 1.4f, 4.5f};
+  float cameraYawRadians = glm::radians(180.0f);
+  float cameraPitchRadians = glm::radians(-12.0f);
   float cameraMoveSpeed = 2.5f;
   float cameraLookSensitivity = 0.0035f;
+  float cameraFarPlane = 100.0f;
   bool cameraLookActive = false;
   double cameraLastCursorX = 0.0;
   double cameraLastCursorY = 0.0;
@@ -70,7 +81,7 @@ struct DefaultDebugUISettings {
 struct DefaultDebugUICallbacks {
   std::function<void()> reloadSceneModel;
   std::function<void()> syncProceduralSkySunWithLight;
-  std::function<glm::vec3()> currentLightDirectionWorld;
+  std::function<glm::vec3()> currentPrimaryDirectionalLightWorld;
 };
 
 class DefaultDebugCameraController {
@@ -83,17 +94,18 @@ public:
   }
 
   void reset() {
-    settings.cameraPosition = {2.7f, 2.7f, 1.1f};
-    settings.cameraYawRadians = glm::radians(-135.0f);
-    settings.cameraPitchRadians = glm::radians(-11.1f);
+    settings.cameraPosition = {0.0f, 1.4f, 4.5f};
+    settings.cameraYawRadians = glm::radians(180.0f);
+    settings.cameraPitchRadians = glm::radians(-12.0f);
+    settings.cameraFarPlane = 100.0f;
     settings.cameraLookActive = false;
   }
 
   static glm::vec3 forwardFromAngles(float yawRadians, float pitchRadians) {
     const float cosPitch = std::cos(pitchRadians);
-    return glm::normalize(glm::vec3(std::cos(yawRadians) * cosPitch,
-                                    std::sin(yawRadians) * cosPitch,
-                                    std::sin(pitchRadians)));
+    return glm::normalize(glm::vec3(std::sin(yawRadians) * cosPitch,
+                                    std::sin(pitchRadians),
+                                    -std::cos(yawRadians) * cosPitch));
   }
 
   static glm::vec3 forwardFromSettings(const DefaultDebugUISettings &settings) {
@@ -122,7 +134,7 @@ public:
         settings.cameraLastCursorX = cursorX;
         settings.cameraLastCursorY = cursorY;
 
-        settings.cameraYawRadians -=
+        settings.cameraYawRadians +=
             static_cast<float>(deltaX) * settings.cameraLookSensitivity;
         settings.cameraPitchRadians -=
             static_cast<float>(deltaY) * settings.cameraLookSensitivity;
@@ -139,7 +151,7 @@ public:
     }
 
     const glm::vec3 forward = currentForward();
-    const glm::vec3 worldUp(0.0f, 0.0f, 1.0f);
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
     const glm::vec3 right = glm::normalize(glm::cross(forward, worldUp));
     const glm::vec3 up = glm::normalize(glm::cross(right, forward));
     const float moveStep = settings.cameraMoveSpeed * deltaSeconds;
@@ -171,6 +183,9 @@ private:
 struct DefaultDebugUIResult {
   bool materialChanged = false;
   bool iblBakeRequested = false;
+  bool saveSessionRequested = false;
+  bool reloadSessionRequested = false;
+  bool resetSessionRequested = false;
 };
 
 struct DefaultDebugUIPerformanceStats {
@@ -190,11 +205,10 @@ public:
   explicit DefaultDebugUI(DefaultDebugUIBindings bindings)
       : bindings(std::move(bindings)) {}
 
-  static DefaultDebugUI create(RenderableModel &sceneModel,
-                               DefaultDebugUISettings &settings,
-                               DefaultDebugUICallbacks callbacks,
-                               DefaultDebugUIPerformanceStats performanceStats =
-                                   {}) {
+  static DefaultDebugUI
+  create(RenderableModel &sceneModel, DefaultDebugUISettings &settings,
+         DefaultDebugUICallbacks callbacks,
+         DefaultDebugUIPerformanceStats performanceStats = {}) {
     return DefaultDebugUI(DefaultDebugUIBindings{
         .sceneModel = sceneModel,
         .settings = settings,
@@ -207,9 +221,11 @@ public:
     DefaultDebugUIResult result;
     result.materialChanged = buildMaterialEditorUi();
     buildPerformanceUi();
+    buildSessionUi(result);
     buildCameraUi();
     buildTransformUi();
-    buildLightUi();
+    buildLightsUi();
+    buildTonemapUi();
     buildViewUi();
     buildPbrDebugUi();
     result.iblBakeRequested = buildEnvironmentUi();
@@ -218,6 +234,37 @@ public:
 
 private:
   DefaultDebugUIBindings bindings;
+
+  static const char *lightTypeLabel(SceneLightType type) {
+    switch (type) {
+    case SceneLightType::Directional:
+      return "Directional";
+    case SceneLightType::Point:
+      return "Point";
+    case SceneLightType::Spot:
+      return "Spot";
+    }
+    return "Unknown";
+  }
+
+  static glm::vec3 directionFromAngles(float azimuthRadians,
+                                       float elevationRadians) {
+    const float cosElevation = std::cos(elevationRadians);
+    return glm::normalize(glm::vec3(cosElevation * std::cos(azimuthRadians),
+                                    cosElevation * std::sin(azimuthRadians),
+                                    std::sin(elevationRadians)));
+  }
+
+  static void anglesFromDirection(const glm::vec3 &direction,
+                                  float &azimuthRadians,
+                                  float &elevationRadians) {
+    const glm::vec3 normalizedDirection = glm::normalize(
+        glm::length(direction) > 1e-6f ? direction
+                                       : glm::vec3(0.0f, -1.0f, -1.0f));
+    azimuthRadians = std::atan2(normalizedDirection.y, normalizedDirection.x);
+    elevationRadians =
+        std::asin(glm::clamp(normalizedDirection.z, -1.0f, 1.0f));
+  }
 
   bool buildMaterialEditorUi() {
     bool materialChanged = false;
@@ -256,8 +303,6 @@ private:
         ImGui::SliderFloat("Metallic", &material.metallicFactor, 0.0f, 1.0f);
     materialChanged |=
         ImGui::SliderFloat("Roughness", &material.roughnessFactor, 0.0f, 1.0f);
-    materialChanged |=
-        ImGui::SliderFloat("Normal Scale", &material.normalScale, 0.0f, 2.0f);
     materialChanged |= ImGui::SliderFloat(
         "Occlusion Strength", &material.occlusionStrength, 0.0f, 1.0f);
 
@@ -274,11 +319,6 @@ private:
                 material.metallicRoughnessTexture.hasEmbeddedRgba()
             ? "yes"
             : "no");
-    ImGui::BulletText("Normal: %s",
-                      material.normalTexture.hasPath() ||
-                              material.normalTexture.hasEmbeddedRgba()
-                          ? "yes"
-                          : "no");
     ImGui::BulletText("Emissive: %s",
                       material.emissiveTexture.hasPath() ||
                               material.emissiveTexture.hasEmbeddedRgba()
@@ -294,21 +334,165 @@ private:
     return materialChanged;
   }
 
-  void buildLightUi() {
+  void buildLightsUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("Light");
-    float azimuthDegrees = glm::degrees(settings.lightAzimuthRadians);
-    float elevationDegrees = glm::degrees(settings.lightElevationRadians);
-    if (ImGui::SliderFloat("Azimuth", &azimuthDegrees, -180.0f, 180.0f)) {
-      settings.lightAzimuthRadians = glm::radians(azimuthDegrees);
+    auto &lights = settings.sceneLights.lights();
+    ImGui::Begin("Lights");
+    if (ImGui::Button("Add Directional")) {
+      settings.sceneLights.addDirectional();
+      settings.selectedLightIndex =
+          static_cast<int>(settings.sceneLights.size()) - 1;
     }
-    if (ImGui::SliderFloat("Elevation", &elevationDegrees, -89.0f, 89.0f)) {
-      settings.lightElevationRadians = glm::radians(elevationDegrees);
+    ImGui::SameLine();
+    if (ImGui::Button("Add Point")) {
+      settings.sceneLights.addPoint();
+      settings.selectedLightIndex =
+          static_cast<int>(settings.sceneLights.size()) - 1;
     }
-    ImGui::SliderFloat("Intensity", &settings.lightIntensity, 0.0f, 20.0f);
-    ImGui::ColorEdit3("Color", &settings.lightColor.x);
-    ImGui::SeparatorText("Tonemap");
+    ImGui::SameLine();
+    if (ImGui::Button("Add Spot")) {
+      settings.sceneLights.addSpot();
+      settings.selectedLightIndex =
+          static_cast<int>(settings.sceneLights.size()) - 1;
+    }
+    if (ImGui::Button("Reset Showcase Lights")) {
+      settings.sceneLights = SceneLightSet::showcaseLights();
+      settings.selectedLightIndex = 0;
+    }
 
+    if (lights.empty()) {
+      settings.selectedLightIndex = -1;
+      ImGui::TextUnformatted("No lights in the scene.");
+      ImGui::End();
+      return;
+    }
+
+    settings.selectedLightIndex = std::clamp(
+        settings.selectedLightIndex, 0, static_cast<int>(lights.size()) - 1);
+
+    ImGui::SeparatorText("Scene Lights");
+    ImGui::Checkbox("Show Markers", &settings.lightMarkersVisible);
+    ImGui::SliderFloat("Marker Scale", &settings.lightMarkerScale, 0.05f, 2.5f);
+    ImGui::Checkbox("Enable Shadows", &settings.shadowsEnabled);
+    ImGui::SliderFloat("Directional Shadow Extent",
+                       &settings.directionalShadowExtent, 1.0f, 40.0f, "%.2f");
+    ImGui::SliderFloat("Directional Shadow Near",
+                       &settings.directionalShadowNearPlane, 0.01f, 5.0f,
+                       "%.2f");
+    ImGui::SliderFloat("Directional Shadow Far",
+                       &settings.directionalShadowFarPlane, 1.0f, 80.0f,
+                       "%.2f");
+    settings.directionalShadowFarPlane =
+        std::max(settings.directionalShadowFarPlane,
+                 settings.directionalShadowNearPlane + 0.5f);
+    for (int index = 0; index < static_cast<int>(lights.size()); ++index) {
+      const SceneLight &light = lights[static_cast<size_t>(index)];
+      std::string label = light.name + "##light_" + std::to_string(index);
+      if (ImGui::Selectable(label.c_str(),
+                            settings.selectedLightIndex == index)) {
+        settings.selectedLightIndex = index;
+      }
+    }
+
+    SceneLight &light =
+        lights[static_cast<size_t>(settings.selectedLightIndex)];
+    ImGui::SeparatorText("Selected Light");
+    ImGui::Text("Type: %s", lightTypeLabel(light.type));
+    ImGui::Checkbox("Enabled", &light.enabled);
+    ImGui::ColorEdit3("Color", &light.color.x);
+    ImGui::DragFloat("Power", &light.power, 0.1f, 0.0f, 10000.0f, "%.3f");
+    light.power = std::max(light.power, 0.0f);
+    ImGui::SliderFloat("Exposure", &light.exposure, -16.0f, 16.0f, "%.3f");
+    if (light.type == SceneLightType::Directional ||
+        light.type == SceneLightType::Spot) {
+      ImGui::SeparatorText("Shadowing");
+      ImGui::Checkbox("Casts Shadow", &light.castsShadow);
+      ImGui::SliderFloat("Shadow Bias", &light.shadowBias, 0.0001f, 0.02f,
+                         "%.4f");
+      ImGui::SliderFloat("Shadow Normal Bias", &light.shadowNormalBias, 0.0f,
+                         0.2f, "%.4f");
+    } else {
+      bool pointShadowDisabled = false;
+      ImGui::SeparatorText("Shadowing");
+      ImGui::BeginDisabled();
+      ImGui::Checkbox("Casts Shadow", &pointShadowDisabled);
+      ImGui::EndDisabled();
+      light.castsShadow = false;
+      ImGui::TextUnformatted("Point-light shadows are not implemented yet.");
+    }
+
+    if (light.type == SceneLightType::Directional) {
+      ImGui::BeginDisabled();
+      glm::vec3 directionalPosition(0.0f, 0.0f, 0.0f);
+      ImGui::DragFloat3("Position", &directionalPosition.x, 0.05f);
+      ImGui::EndDisabled();
+      ImGui::TextUnformatted("Directional lights use direction only.");
+    }
+
+    if (light.type == SceneLightType::Directional ||
+        light.type == SceneLightType::Spot) {
+      float azimuthRadians = 0.0f;
+      float elevationRadians = 0.0f;
+      anglesFromDirection(light.direction, azimuthRadians, elevationRadians);
+      float azimuthDegrees = glm::degrees(azimuthRadians);
+      float elevationDegrees = glm::degrees(elevationRadians);
+      if (ImGui::SliderFloat("Azimuth", &azimuthDegrees, -180.0f, 180.0f)) {
+        azimuthRadians = glm::radians(azimuthDegrees);
+        light.direction = directionFromAngles(azimuthRadians, elevationRadians);
+      }
+      if (ImGui::SliderFloat("Elevation", &elevationDegrees, -89.0f, 89.0f)) {
+        elevationRadians = glm::radians(elevationDegrees);
+        light.direction = directionFromAngles(azimuthRadians, elevationRadians);
+      }
+      ImGui::Text("Direction: %.2f %.2f %.2f", light.direction.x,
+                  light.direction.y, light.direction.z);
+    }
+
+    if (light.type == SceneLightType::Point ||
+        light.type == SceneLightType::Spot) {
+      ImGui::SeparatorText("Transform");
+      ImGui::DragFloat3("Position", &light.position.x, 0.05f);
+    }
+
+    if (light.type == SceneLightType::Point) {
+      ImGui::DragFloat("Radius", &light.radius, 0.01f, 0.0f, 25.0f, "%.3f m");
+      light.radius = std::max(light.radius, 0.0f);
+    }
+
+    if (light.type == SceneLightType::Spot) {
+      ImGui::SliderFloat("Range", &light.range, 0.5f, 25.0f);
+      light.range = std::max(light.range, 0.01f);
+      float innerDegrees = glm::degrees(light.innerConeAngleRadians);
+      float outerDegrees = glm::degrees(light.outerConeAngleRadians);
+      if (ImGui::SliderFloat("Inner Cone", &innerDegrees, 1.0f, 85.0f)) {
+        light.innerConeAngleRadians = glm::radians(innerDegrees);
+      }
+      if (ImGui::SliderFloat("Outer Cone", &outerDegrees, 1.0f, 89.0f)) {
+        light.outerConeAngleRadians = glm::radians(outerDegrees);
+      }
+      light.outerConeAngleRadians =
+          std::max(light.outerConeAngleRadians, light.innerConeAngleRadians);
+    }
+
+    if (ImGui::Button("Remove Selected Light") && !lights.empty()) {
+      settings.sceneLights.remove(
+          static_cast<size_t>(settings.selectedLightIndex));
+      settings.selectedLightIndex = std::clamp(
+          settings.selectedLightIndex, 0,
+          std::max(static_cast<int>(settings.sceneLights.size()) - 1, 0));
+    }
+
+    const glm::vec3 primaryDirection =
+        bindings.callbacks.currentPrimaryDirectionalLightWorld();
+    ImGui::SeparatorText("Primary Directional");
+    ImGui::Text("Direction: %.2f %.2f %.2f", primaryDirection.x,
+                primaryDirection.y, primaryDirection.z);
+    ImGui::End();
+  }
+
+  void buildTonemapUi() {
+    auto &settings = bindings.settings;
+    ImGui::Begin("Tonemap");
     int tonemapOperatorIndex = static_cast<int>(settings.tonemapOperator);
     ImGui::Combo("Operator", &tonemapOperatorIndex,
                  "None\0Reinhard\0ACES\0Filmic\0");
@@ -323,11 +507,6 @@ private:
     }
     ImGui::SliderFloat("White Point", &settings.whitePoint, 0.5f, 16.0f);
     ImGui::SliderFloat("Gamma", &settings.gamma, 1.0f, 3.0f);
-
-    const glm::vec3 lightDirectionWorld =
-        bindings.callbacks.currentLightDirectionWorld();
-    ImGui::Text("Direction: %.2f %.2f %.2f", lightDirectionWorld.x,
-                lightDirectionWorld.y, lightDirectionWorld.z);
     ImGui::End();
   }
 
@@ -355,6 +534,16 @@ private:
     ImGui::RadioButton("Tone Mapping Pass", &output,
                        static_cast<int>(PresentedOutput::TonemapPass));
 
+    ImGui::SeparatorText("Shadow Maps");
+    ImGui::RadioButton("Directional Shadow", &output,
+                       static_cast<int>(PresentedOutput::DirectionalShadow));
+    ImGui::RadioButton("Spot Shadow 1", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow0));
+    ImGui::RadioButton("Spot Shadow 2", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow1));
+    ImGui::RadioButton("Spot Shadow 3", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow2));
+
     settings.presentedOutput = static_cast<PresentedOutput>(output);
     ImGui::End();
   }
@@ -366,8 +555,6 @@ private:
     ImGui::SliderFloat3("Rotation", &settings.modelRotationDegrees.x, -180.0f,
                         180.0f);
     ImGui::DragFloat3("Scale", &settings.modelScale.x, 0.1f, 0.01f, 200.0f);
-    ImGui::Separator();
-    ImGui::Checkbox("Smooth glTF Normals", &settings.smoothGltfNormalsEnabled);
     if (ImGui::Button("Reload Model")) {
       bindings.callbacks.reloadSceneModel();
     }
@@ -384,6 +571,8 @@ private:
     ImGui::SliderFloat("Move Speed", &settings.cameraMoveSpeed, 0.5f, 10.0f);
     ImGui::SliderFloat("Look Sensitivity", &settings.cameraLookSensitivity,
                        0.001f, 0.01f);
+    ImGui::SliderFloat("Far Clip", &settings.cameraFarPlane, 10.0f, 500.0f,
+                       "%.1f");
     if (ImGui::Button("Reset Camera")) {
       cameraController.reset();
     }
@@ -398,6 +587,22 @@ private:
     ImGui::Text("FPS: %.1f", performanceStats.fps);
     ImGui::SameLine(0.0f, 16.0f);
     ImGui::Text("Frame Time: %.2f ms", performanceStats.frameTimeMs);
+    ImGui::End();
+  }
+
+  void buildSessionUi(DefaultDebugUIResult &result) {
+    ImGui::Begin("Session");
+    if (ImGui::Button("Save Current")) {
+      result.saveSessionRequested = true;
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    if (ImGui::Button("Reload From Disk")) {
+      result.reloadSessionRequested = true;
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    if (ImGui::Button("Reset To Defaults")) {
+      result.resetSessionRequested = true;
+    }
     ImGui::End();
   }
 

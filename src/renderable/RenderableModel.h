@@ -121,10 +121,6 @@ public:
 
   const ModelAsset *modelAsset() const { return asset.get(); }
 
-  void setSmoothGltfNormalsEnabled(bool enabled) {
-    smoothGltfNormalsEnabled = enabled;
-  }
-
 private:
   template <typename TAsset>
   void loadAsset(const std::string &path, CommandContext &commandContext,
@@ -134,9 +130,6 @@ private:
                  uint32_t framesInFlight,
                  const MaterialOverrideFn &materialOverride = nullptr) {
     auto loadedAsset = std::make_unique<TAsset>();
-    if constexpr (std::is_same_v<TAsset, GltfModelAsset>) {
-      loadedAsset->setRecomputeSmoothNormalsEnabled(smoothGltfNormalsEnabled);
-    }
     loadedAsset->load(path);
     loadedAsset->createGpuBuffers(commandContext, deviceContext);
     if (materialOverride) {
@@ -150,5 +143,4 @@ private:
 
   std::unique_ptr<ModelAsset> asset;
   ModelMaterialSet materialSet;
-  bool smoothGltfNormalsEnabled = false;
 };

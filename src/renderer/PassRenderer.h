@@ -14,7 +14,8 @@ public:
   void initialize(DeviceContext &deviceContext,
                   SwapchainContext &swapchainContext) {
     if (passes.empty()) {
-      throw std::runtime_error("PassRenderer requires at least one render pass");
+      throw std::runtime_error(
+          "PassRenderer requires at least one render pass");
     }
 
     for (auto &renderPass : passes) {
@@ -44,14 +45,19 @@ public:
               const std::vector<RenderItem> &renderItems, uint32_t frameIndex,
               uint32_t imageIndex) {
     commandBuffer.begin({});
-    RenderPassContext context{.commandBuffer = commandBuffer,
-                              .swapchainContext = swapchainContext,
-                              .frameIndex = frameIndex,
-                              .imageIndex = imageIndex};
+    record(RenderPassContext{.commandBuffer = commandBuffer,
+                             .swapchainContext = swapchainContext,
+                             .frameIndex = frameIndex,
+                             .imageIndex = imageIndex},
+           renderItems);
+    commandBuffer.end();
+  }
+
+  void record(const RenderPassContext &context,
+              const std::vector<RenderItem> &renderItems) {
     for (auto &renderPass : passes) {
       renderPass->record(context, renderItems);
     }
-    commandBuffer.end();
   }
 
   vk::raii::DescriptorSetLayout &descriptorSetLayout() {

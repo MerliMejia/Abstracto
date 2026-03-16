@@ -26,8 +26,8 @@ public:
               const vk::raii::DescriptorSetLayout &descriptorSetLayout,
               FrameGeometryUniforms &frameGeometryUniforms,
               Texture &baseColorTexture,
-              Texture &metallicRoughnessTexture, Texture &normalTexture,
-              Texture &emissiveTexture, Texture &occlusionTexture,
+              Texture &metallicRoughnessTexture, Texture &emissiveTexture,
+              Texture &occlusionTexture,
               Sampler &sampler, const MaterialUniformData &materialUniform,
               uint32_t framesInFlight) {
     createMaterialBuffer(deviceContext, materialUniform);
@@ -36,7 +36,7 @@ public:
         vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer,
                                framesInFlight * 2),
         vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler,
-                               framesInFlight * 5)};
+                               framesInFlight * 4)};
     vk::DescriptorPoolCreateInfo poolInfo{
         .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
         .maxSets = framesInFlight,
@@ -72,10 +72,6 @@ public:
       vk::DescriptorImageInfo metallicRoughnessImageInfo{
           .sampler = sampler.handle(),
           .imageView = metallicRoughnessTexture.imageView(),
-          .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
-      vk::DescriptorImageInfo normalImageInfo{
-          .sampler = sampler.handle(),
-          .imageView = normalTexture.imageView(),
           .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
       vk::DescriptorImageInfo emissiveImageInfo{
           .sampler = sampler.handle(),
@@ -113,23 +109,16 @@ public:
                                  .descriptorCount = 1,
                                  .descriptorType =
                                      vk::DescriptorType::eCombinedImageSampler,
-                                 .pImageInfo = &normalImageInfo},
+                                 .pImageInfo = &emissiveImageInfo},
           vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
                                  .dstBinding = 4,
                                  .dstArrayElement = 0,
                                  .descriptorCount = 1,
                                  .descriptorType =
                                      vk::DescriptorType::eCombinedImageSampler,
-                                 .pImageInfo = &emissiveImageInfo},
-          vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
-                                 .dstBinding = 5,
-                                 .dstArrayElement = 0,
-                                 .descriptorCount = 1,
-                                 .descriptorType =
-                                     vk::DescriptorType::eCombinedImageSampler,
                                  .pImageInfo = &occlusionImageInfo},
           vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
-                                 .dstBinding = 6,
+                                 .dstBinding = 5,
                                  .dstArrayElement = 0,
                                  .descriptorCount = 1,
                                  .descriptorType =

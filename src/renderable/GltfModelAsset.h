@@ -4,10 +4,6 @@
 
 class GltfModelAsset : public ModelAsset {
 public:
-  void setRecomputeSmoothNormalsEnabled(bool enabled) {
-    recomputeSmoothNormalsEnabled = enabled;
-  }
-
   void load(const std::string &path);
 
   void createGpuBuffers(CommandContext &commandContext,
@@ -35,6 +31,5 @@ public:
 
 private:
   std::string sourcePath;
-  bool recomputeSmoothNormalsEnabled = false;
   ImportedGeometryMesh geometryMesh;
 };

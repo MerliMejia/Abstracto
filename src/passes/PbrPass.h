@@ -1,9 +1,18 @@
 #pragma once
 
-#include "../renderer/FullscreenRenderPass.h"
 #include "../renderable/ImageBasedLighting.h"
+#include "../renderable/LightTypes.h"
+#include "../renderable/SceneLightSet.h"
+#include "../renderer/FullscreenRenderPass.h"
+#include "../renderer/PassUniformSet.h"
 #include "GeometryPass.h"
+#include "ShadowPass.h"
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdint>
+#include <glm/gtc/matrix_transform.hpp>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -17,15 +26,31 @@ enum class PbrDebugView : uint32_t {
   Background = 6,
 };
 
-struct PbrPassPushConstant {
+constexpr uint32_t MAX_PBR_LIGHTS = 8;
+constexpr uint32_t MAX_PBR_SHADOW_MAPS = 4;
+constexpr uint32_t INVALID_PBR_SHADOW_MAP = ~0u;
+
+struct PbrLightUniformData {
+  glm::vec4 positionAndType{0.0f, 0.0f, 0.0f,
+                            static_cast<float>(SceneLightType::Directional)};
+  glm::vec4 directionAndRange{0.0f, -1.0f, 0.0f, 1.0f};
+  glm::vec4 colorAndRadiance{1.0f, 1.0f, 1.0f, 1.0f};
+  glm::vec4 spotAngles{1.0f, 0.0f, 0.0f, 0.0f};
+  glm::mat4 shadowMatrix{1.0f};
+  glm::vec4 shadowParams{0.0f, 0.0f, 0.0f, 0.0f};
+  alignas(16) glm::uvec4 shadowInfo{0u, INVALID_PBR_SHADOW_MAP, 0u, 0u};
+};
+
+struct PbrPassUniformData {
   glm::vec4 projParams{1.0f, -1.0f, -1.0f, -0.1f};
-  glm::vec4 viewRightAndBackground{1.0f, 0.0f, 0.0f, 1.0f};
-  glm::vec4 viewUpAndDiffuse{0.0f, 1.0f, 0.0f, 1.0f};
-  glm::vec4 viewForwardAndSpecular{0.0f, 0.0f, -1.0f, 1.0f};
-  glm::vec4 lightDirectionAndRotation{0.0f, -1.0f, 0.0f, 0.0f};
-  glm::vec4 lightColorAndPrefilterMip{1.0f, 1.0f, 1.0f, 0.0f};
+  glm::vec4 cameraWorldAndBackground{0.0f, 0.0f, 0.0f, 1.0f};
+  glm::vec4 viewRightAndDiffuse{1.0f, 0.0f, 0.0f, 1.0f};
+  glm::vec4 viewUpAndSpecular{0.0f, 1.0f, 0.0f, 1.0f};
+  glm::vec4 viewForwardAndUnused{0.0f, 0.0f, -1.0f, 0.0f};
+  glm::vec4 environmentParams{0.0f, 0.0f, 0.0f, 0.0f};
   glm::vec4 specularTuning{2.0f, 0.0f, 0.0f, 0.0f};
-  glm::uvec4 settings{0u, 0u, 0u, 0u};
+  alignas(16) glm::uvec4 settings{0u, 0u, 0u, 0u};
+  std::array<PbrLightUniformData, MAX_PBR_LIGHTS> lights{};
 };
 
 class PbrPass : public FullscreenRenderPass {
@@ -37,59 +62,125 @@ public:
 
   PbrPass(PipelineSpec spec, uint32_t framesInFlight,
           const GeometryPass *sourcePass = nullptr)
-      : FullscreenRenderPass(std::move(spec), framesInFlight,
-                             RasterPassAttachmentConfig{
-                                 .useColorAttachment = true,
-                                 .useDepthAttachment = false,
-                                 .useMsaaColorAttachment = false,
-                                 .resolveToSwapchain = false,
-                                 .useSwapchainColorAttachment = false,
-                                 .offscreenColorFormat =
-                                     vk::Format::eR16G16B16A16Sfloat,
-                                 .sampleColorAttachment = true,
-                             }),
+      : FullscreenRenderPass(
+            std::move(spec), framesInFlight,
+            RasterPassAttachmentConfig{
+                .useColorAttachment = true,
+                .useDepthAttachment = false,
+                .useMsaaColorAttachment = false,
+                .resolveToSwapchain = false,
+                .useSwapchainColorAttachment = false,
+                .offscreenColorFormat = vk::Format::eR16G16B16A16Sfloat,
+                .sampleColorAttachment = true,
+            }),
         sourcePassRef(sourcePass) {}
 
   void setSourcePass(const GeometryPass &sourcePass) {
     sourcePassRef = &sourcePass;
   }
 
+  void setShadowPass(uint32_t index, const ShadowPass &shadowPass) {
+    shadowPassRefs.at(index) = &shadowPass;
+  }
+
   void setImageBasedLighting(const ImageBasedLighting &imageBasedLighting) {
     ibl = &imageBasedLighting;
-    pushData.lightColorAndPrefilterMip.w = ibl->maxPrefilterMipLevel();
+    uniformData.environmentParams.y = ibl->maxPrefilterMipLevel();
   }
 
   void setCamera(const glm::mat4 &proj, const glm::mat4 &view) {
-    pushData.projParams =
+    uniformData.projParams =
         glm::vec4(proj[0][0], proj[1][1], proj[2][2], proj[3][2]);
 
     const glm::mat4 invView = glm::inverse(view);
-    pushData.viewRightAndBackground =
-        glm::vec4(glm::normalize(glm::vec3(invView[0])), pushData.viewRightAndBackground.w);
-    pushData.viewUpAndDiffuse =
-        glm::vec4(glm::normalize(glm::vec3(invView[1])), pushData.viewUpAndDiffuse.w);
-    pushData.viewForwardAndSpecular = glm::vec4(
-        glm::normalize(-glm::vec3(invView[2])),
-        pushData.viewForwardAndSpecular.w);
+    uniformData.cameraWorldAndBackground = glm::vec4(
+        glm::vec3(invView[3]), uniformData.cameraWorldAndBackground.w);
+    uniformData.viewRightAndDiffuse =
+        glm::vec4(glm::normalize(glm::vec3(invView[0])),
+                  uniformData.viewRightAndDiffuse.w);
+    uniformData.viewUpAndSpecular = glm::vec4(
+        glm::normalize(glm::vec3(invView[1])), uniformData.viewUpAndSpecular.w);
+    uniformData.viewForwardAndUnused =
+        glm::vec4(glm::normalize(-glm::vec3(invView[2])),
+                  uniformData.viewForwardAndUnused.w);
   }
 
-  void setDirectionalLight(const glm::vec3 &directionViewSpace,
-                           const glm::vec3 &color) {
-    pushData.lightDirectionAndRotation =
-        glm::vec4(glm::normalize(directionViewSpace), 0.0f);
-    pushData.lightColorAndPrefilterMip =
-        glm::vec4(color, pushData.lightColorAndPrefilterMip.w);
+  void setSceneLights(const SceneLightSet &sceneLights) {
+    uint32_t lightCount = 0;
+    sceneLightToUniformIndex.assign(sceneLights.size(), -1);
+
+    for (auto &lightUniform : uniformData.lights) {
+      lightUniform = PbrLightUniformData{};
+    }
+
+    for (size_t sceneIndex = 0; sceneIndex < sceneLights.lights().size();
+         ++sceneIndex) {
+      const auto &light = sceneLights.lights()[sceneIndex];
+      if (!light.enabled || lightCount >= MAX_PBR_LIGHTS) {
+        continue;
+      }
+
+      auto &lightUniform = uniformData.lights[lightCount];
+      lightUniform.directionAndRange = glm::vec4(
+          glm::normalize(light.direction), std::max(light.range, 0.01f));
+      lightUniform.colorAndRadiance =
+          glm::vec4(light.color, light.radianceScale());
+      lightUniform.positionAndType =
+          glm::vec4(light.position, static_cast<float>(light.type));
+      lightUniform.spotAngles = glm::vec4(std::cos(light.innerConeAngleRadians),
+                                          std::cos(light.outerConeAngleRadians),
+                                          std::max(light.radius, 0.0f), 0.0f);
+      sceneLightToUniformIndex[sceneIndex] = static_cast<int32_t>(lightCount);
+      ++lightCount;
+    }
+
+    uniformData.settings.z = lightCount;
+  }
+
+  std::optional<uint32_t>
+  uniformLightIndexForSceneLight(size_t sceneLightIndex) const {
+    if (sceneLightIndex >= sceneLightToUniformIndex.size()) {
+      return std::nullopt;
+    }
+
+    const int32_t packedIndex = sceneLightToUniformIndex[sceneLightIndex];
+    if (packedIndex < 0) {
+      return std::nullopt;
+    }
+    return static_cast<uint32_t>(packedIndex);
+  }
+
+  void clearLightShadows() {
+    for (auto &lightUniform : uniformData.lights) {
+      lightUniform.shadowMatrix = glm::mat4(1.0f);
+      lightUniform.shadowParams = glm::vec4(0.0f);
+      lightUniform.shadowInfo = glm::uvec4(0u, INVALID_PBR_SHADOW_MAP, 0u, 0u);
+    }
+  }
+
+  void setLightShadow(uint32_t lightIndex, uint32_t shadowMapIndex,
+                      const glm::mat4 &shadowMatrix, float depthBias,
+                      float normalBias, float shadowMapResolution) {
+    if (lightIndex >= MAX_PBR_LIGHTS || shadowMapIndex >= MAX_PBR_SHADOW_MAPS) {
+      throw std::runtime_error("PbrPass shadow binding index out of range");
+    }
+
+    auto &lightUniform = uniformData.lights[lightIndex];
+    lightUniform.shadowMatrix = shadowMatrix;
+    lightUniform.shadowParams =
+        glm::vec4(depthBias, normalBias,
+                  1.0f / std::max(shadowMapResolution, 1.0f), 0.0f);
+    lightUniform.shadowInfo = glm::uvec4(1u, shadowMapIndex, 0u, 0u);
   }
 
   void setEnvironmentControls(float environmentRotationRadians,
-                              float backgroundIntensity,
-                              float diffuseIntensity,
+                              float backgroundIntensity, float diffuseIntensity,
                               float specularIntensity, bool enableIbl,
                               bool showBackground) {
-    pushData.viewRightAndBackground.w = backgroundIntensity;
-    pushData.viewUpAndDiffuse.w = diffuseIntensity;
-    pushData.viewForwardAndSpecular.w = specularIntensity;
-    pushData.lightDirectionAndRotation.w = environmentRotationRadians;
+    uniformData.cameraWorldAndBackground.w = backgroundIntensity;
+    uniformData.viewRightAndDiffuse.w = diffuseIntensity;
+    uniformData.viewUpAndSpecular.w = specularIntensity;
+    uniformData.environmentParams.x = environmentRotationRadians;
 
     uint32_t flags = 0;
     if (enableIbl) {
@@ -98,39 +189,34 @@ public:
     if (showBackground) {
       flags |= ShowBackground;
     }
-    pushData.settings.x = flags;
+    uniformData.settings.x = flags;
   }
 
   void setDebugView(PbrDebugView debugView) {
-    pushData.settings.y = static_cast<uint32_t>(debugView);
+    uniformData.settings.y = static_cast<uint32_t>(debugView);
   }
 
   void setDielectricSpecularScale(float scale) {
-    pushData.specularTuning.x = std::max(scale, 0.0f);
+    uniformData.specularTuning.x = std::max(scale, 0.0f);
   }
 
 protected:
-  std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
-    return {
-        {.binding = 0},
-        {.binding = 1},
-        {.binding = 2},
-        {.binding = 3},
-        {.binding = 4},
-        {.binding = 5},
-        {.binding = 6},
-        {.binding = 7},
-        {.binding = 8},
-    };
+  std::vector<DescriptorBindingSpec>
+  secondaryDescriptorBindings() const override {
+    return {{
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment,
+    }};
   }
 
-  std::vector<vk::PushConstantRange> pushConstantRanges() const override {
+  std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
     return {
-        vk::PushConstantRange{
-            .stageFlags = vk::ShaderStageFlagBits::eFragment,
-            .offset = 0,
-            .size = sizeof(PbrPassPushConstant),
-        },
+        {.binding = 0},  {.binding = 1}, {.binding = 2},  {.binding = 3},
+        {.binding = 4},  {.binding = 5}, {.binding = 6},  {.binding = 7},
+        {.binding = 8},  {.binding = 9}, {.binding = 10}, {.binding = 11},
+        {.binding = 12},
     };
   }
 
@@ -160,26 +246,47 @@ protected:
         {.binding = 6, .resource = ibl->irradianceResource()},
         {.binding = 7, .resource = ibl->prefilteredResource()},
         {.binding = 8, .resource = ibl->brdfResource()},
+        {.binding = 9, .resource = shadowPassRefs[0]->sampledShadowOutput()},
+        {.binding = 10, .resource = shadowPassRefs[1]->sampledShadowOutput()},
+        {.binding = 11, .resource = shadowPassRefs[2]->sampledShadowOutput()},
+        {.binding = 12, .resource = shadowPassRefs[3]->sampledShadowOutput()},
     };
   }
 
+  void initializeAdditionalPassResources(DeviceContext &deviceContext,
+                                         SwapchainContext &) override {
+    lightUniformSet.initialize(deviceContext, passDescriptorSetLayout(1),
+                               framesInFlight());
+  }
+
   void bindAdditionalPassResources(const RenderPassContext &context) override {
-    context.commandBuffer.pushConstants<PbrPassPushConstant>(
-        *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eFragment, 0,
-        {pushData});
+    lightUniformSet.write(context.frameIndex, uniformData);
+    lightUniformSet.bind(context.commandBuffer, pipelineLayoutHandle(),
+                         context.frameIndex, 1);
   }
 
 private:
   const GeometryPass *sourcePassRef = nullptr;
   const ImageBasedLighting *ibl = nullptr;
-  PbrPassPushConstant pushData{};
+  std::array<const ShadowPass *, MAX_PBR_SHADOW_MAPS> shadowPassRefs{
+      nullptr, nullptr, nullptr, nullptr};
+  PbrPassUniformData uniformData{};
+  PassUniformSet<PbrPassUniformData> lightUniformSet;
+  std::vector<int32_t> sceneLightToUniformIndex;
 
   void validateResources() const {
     if (sourcePassRef == nullptr) {
       throw std::runtime_error("PbrPass requires a GeometryPass source");
     }
     if (ibl == nullptr) {
-      throw std::runtime_error("PbrPass requires image-based lighting resources");
+      throw std::runtime_error(
+          "PbrPass requires image-based lighting resources");
+    }
+    for (const ShadowPass *shadowPass : shadowPassRefs) {
+      if (shadowPass == nullptr) {
+        throw std::runtime_error(
+            "PbrPass requires all shadow passes to be set");
+      }
     }
   }
 };
