@@ -18,5 +18,6 @@ struct PipelineSpec {
   vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
   bool enableDepthTest = true;
   bool enableDepthWrite = true;
+  bool enableDepthBias = false;
   bool enableBlending = false;
 };

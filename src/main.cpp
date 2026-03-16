@@ -6,6 +6,7 @@
 #include "passes/GeometryPass.h"
 #include "passes/ImGuiPass.h"
 #include "passes/PbrPass.h"
+#include "passes/ShadowPass.h"
 #include "passes/TonemapPass.h"
 #include "renderable/DebugLightMeshes.h"
 #include "renderable/FrameGeometryUniforms.h"
@@ -18,6 +19,7 @@
 #include "utils/DefaultDebugUI.h"
 #include "vulkan/vulkan.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -32,6 +34,8 @@ constexpr uint32_t HEIGHT = 720;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 constexpr bool DEBUG_SHOW_SOLID_TRANSFORM_PASS = false;
 constexpr float CAMERA_NEAR_PLANE = 0.1f;
+constexpr uint32_t SHADOW_MAP_RESOLUTION = 1024;
+constexpr uint32_t MAX_SPOT_SHADOW_PASSES = 3;
 const std::string ASSET_PATH = "assets";
 const std::filesystem::path DEBUG_SESSION_PATH =
     std::filesystem::path(ASSET_PATH) / "debug" / "last_session.json";
@@ -67,7 +71,13 @@ private:
   FrameGeometryUniforms frameGeometryUniforms;
   Sampler sampler;
   ImageBasedLighting imageBasedLighting;
+  std::unique_ptr<ShadowPass> directionalShadowPassStorage;
+  std::array<std::unique_ptr<ShadowPass>, MAX_SPOT_SHADOW_PASSES>
+      spotShadowPassStorage;
   GeometryPass *geometryPass = nullptr;
+  ShadowPass *directionalShadowPass = nullptr;
+  std::array<ShadowPass *, MAX_SPOT_SHADOW_PASSES> spotShadowPasses{
+      nullptr, nullptr, nullptr};
   PbrPass *pbrPass = nullptr;
   TonemapPass *tonemapPass = nullptr;
   DebugPresentPass *debugPresentPass = nullptr;
@@ -102,6 +112,19 @@ private:
 
   void rebuildSceneRenderItems() {
     renderItems = sceneModel.buildRenderItems(geometryPass);
+    if (directionalShadowPass != nullptr) {
+      auto shadowItems = sceneModel.buildRenderItems(directionalShadowPass);
+      renderItems.insert(renderItems.end(), shadowItems.begin(),
+                         shadowItems.end());
+    }
+    for (ShadowPass *spotShadowPass : spotShadowPasses) {
+      if (spotShadowPass == nullptr) {
+        continue;
+      }
+      auto shadowItems = sceneModel.buildRenderItems(spotShadowPass);
+      renderItems.insert(renderItems.end(), shadowItems.begin(),
+                         shadowItems.end());
+    }
     renderItems.push_back(RenderItem{.mesh = &lightQuad,
                                      .descriptorBindings = nullptr,
                                      .targetPass = pbrPass});
@@ -147,8 +170,42 @@ private:
     }
     imageBasedLighting.rebuild(deviceContext(), commandContext(),
                                debugUiSettings.iblBakeSettings);
+    recreateShadowPasses();
     renderer.recreate(deviceContext(), swapchainContext());
     reloadSceneModel();
+  }
+
+  void initializeShadowPasses() {
+    directionalShadowPassStorage = std::make_unique<ShadowPass>(
+        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
+                     .cullMode = vk::CullModeFlagBits::eBack,
+                     .frontFace = vk::FrontFace::eCounterClockwise,
+                     .enableDepthBias = true},
+        MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
+    directionalShadowPass = directionalShadowPassStorage.get();
+    directionalShadowPass->initialize(deviceContext(), swapchainContext());
+
+    for (uint32_t index = 0; index < MAX_SPOT_SHADOW_PASSES; ++index) {
+      spotShadowPassStorage[index] = std::make_unique<ShadowPass>(
+          PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
+                       .cullMode = vk::CullModeFlagBits::eBack,
+                       .frontFace = vk::FrontFace::eCounterClockwise,
+                       .enableDepthBias = true},
+          MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
+      spotShadowPasses[index] = spotShadowPassStorage[index].get();
+      spotShadowPasses[index]->initialize(deviceContext(), swapchainContext());
+    }
+  }
+
+  void recreateShadowPasses() {
+    if (directionalShadowPass != nullptr) {
+      directionalShadowPass->recreate(deviceContext(), swapchainContext());
+    }
+    for (ShadowPass *spotShadowPass : spotShadowPasses) {
+      if (spotShadowPass != nullptr) {
+        spotShadowPass->recreate(deviceContext(), swapchainContext());
+      }
+    }
   }
 
   void initVulkan() {
@@ -156,6 +213,7 @@ private:
     ensureDefaultEnvironmentPath();
 
     sampler.create(deviceContext());
+    initializeShadowPasses();
 
     lightQuad = buildFullscreenQuadMesh();
     lightQuad.createVertexBuffer(commandContext(), deviceContext());
@@ -195,6 +253,10 @@ private:
     imageBasedLighting.create(deviceContext(), commandContext(),
                               debugUiSettings.iblBakeSettings);
     pbrPass->setImageBasedLighting(imageBasedLighting);
+    pbrPass->setShadowPass(0, *directionalShadowPass);
+    for (uint32_t index = 0; index < MAX_SPOT_SHADOW_PASSES; ++index) {
+      pbrPass->setShadowPass(index + 1, *spotShadowPasses[index]);
+    }
     renderer.addPass(std::move(pbrPassLocal));
 
     auto tonemapPassLocal = std::make_unique<TonemapPass>(
@@ -210,7 +272,8 @@ private:
                          ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
                      .enableDepthTest = false,
                      .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass, tonemapPass);
+        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass, tonemapPass,
+        directionalShadowPass, spotShadowPasses);
     debugPresentPass = debugPresentPassLocal.get();
     debugPresentPass->setSelectedOutput(
         static_cast<uint32_t>(debugUiSettings.presentedOutput));
@@ -273,11 +336,131 @@ private:
     return radiance;
   }
 
+  static glm::vec3 shadowUpVector(const glm::vec3 &direction) {
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    if (std::abs(glm::dot(direction, worldUp)) > 0.98f) {
+      return glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+    return worldUp;
+  }
+
+  glm::mat4 buildDirectionalShadowMatrix(const SceneLight &light) const {
+    const glm::vec3 direction = glm::normalize(light.direction);
+    const float shadowExtent =
+        std::max(debugUiSettings.directionalShadowExtent, 0.5f);
+    const float nearPlane =
+        std::max(debugUiSettings.directionalShadowNearPlane, 0.01f);
+    const float farPlane =
+        std::max(debugUiSettings.directionalShadowFarPlane, nearPlane + 0.5f);
+    const glm::vec3 target = debugUiSettings.modelPosition;
+    const glm::vec3 eye = target - direction * (farPlane * 0.5f);
+    const glm::mat4 view = glm::lookAt(eye, target, shadowUpVector(direction));
+    glm::mat4 proj = glm::ortho(-shadowExtent, shadowExtent, -shadowExtent,
+                                shadowExtent, nearPlane, farPlane);
+    proj[1][1] *= -1.0f;
+    return proj * view;
+  }
+
+  glm::mat4 buildSpotShadowMatrix(const SceneLight &light) const {
+    const glm::vec3 direction = glm::normalize(light.direction);
+    const float nearPlane = 0.05f;
+    const float farPlane = std::max(light.range, nearPlane + 0.05f);
+    const float fovRadians =
+        std::clamp(light.outerConeAngleRadians * 2.0f, glm::radians(1.0f),
+                   glm::radians(179.0f));
+    const glm::mat4 view = glm::lookAt(
+        light.position, light.position + direction, shadowUpVector(direction));
+    glm::mat4 proj = glm::perspective(fovRadians, 1.0f, nearPlane, farPlane);
+    proj[1][1] *= -1.0f;
+    return proj * view;
+  }
+
+  void configureShadowPasses(const GeometryUniformData &geometryUniformData) {
+    if (pbrPass == nullptr) {
+      return;
+    }
+
+    pbrPass->clearLightShadows();
+
+    if (directionalShadowPass != nullptr) {
+      directionalShadowPass->setEnabled(false);
+      directionalShadowPass->setModelMatrix(geometryUniformData.model);
+      directionalShadowPass->setLightViewProj(glm::mat4(1.0f));
+    }
+    for (ShadowPass *spotShadowPass : spotShadowPasses) {
+      if (spotShadowPass == nullptr) {
+        continue;
+      }
+      spotShadowPass->setEnabled(false);
+      spotShadowPass->setModelMatrix(geometryUniformData.model);
+      spotShadowPass->setLightViewProj(glm::mat4(1.0f));
+    }
+
+    if (!debugUiSettings.shadowsEnabled) {
+      return;
+    }
+
+    bool directionalAssigned = false;
+    uint32_t spotShadowSlot = 0;
+    const auto &lights = debugUiSettings.sceneLights.lights();
+    for (size_t sceneLightIndex = 0; sceneLightIndex < lights.size();
+         ++sceneLightIndex) {
+      const auto &light = lights[sceneLightIndex];
+      if (!light.enabled || !light.castsShadow) {
+        continue;
+      }
+
+      const auto uniformLightIndex =
+          pbrPass->uniformLightIndexForSceneLight(sceneLightIndex);
+      if (!uniformLightIndex.has_value()) {
+        continue;
+      }
+
+      if (light.type == SceneLightType::Directional && !directionalAssigned &&
+          directionalShadowPass != nullptr) {
+        const glm::mat4 shadowMatrix = buildDirectionalShadowMatrix(light);
+        directionalShadowPass->setEnabled(true);
+        directionalShadowPass->setLightViewProj(shadowMatrix);
+        pbrPass->setLightShadow(
+            *uniformLightIndex, 0, shadowMatrix, light.shadowBias,
+            light.shadowNormalBias,
+            static_cast<float>(directionalShadowPass->resolution()));
+        directionalAssigned = true;
+        continue;
+      }
+
+      if (light.type == SceneLightType::Spot &&
+          spotShadowSlot < MAX_SPOT_SHADOW_PASSES &&
+          spotShadowPasses[spotShadowSlot] != nullptr) {
+        const glm::mat4 shadowMatrix = buildSpotShadowMatrix(light);
+        spotShadowPasses[spotShadowSlot]->setEnabled(true);
+        spotShadowPasses[spotShadowSlot]->setLightViewProj(shadowMatrix);
+        pbrPass->setLightShadow(
+            *uniformLightIndex, spotShadowSlot + 1, shadowMatrix,
+            light.shadowBias, light.shadowNormalBias,
+            static_cast<float>(spotShadowPasses[spotShadowSlot]->resolution()));
+        ++spotShadowSlot;
+      }
+    }
+  }
+
+  void recordShadowPasses(const RenderPassContext &context) {
+    if (directionalShadowPass != nullptr) {
+      directionalShadowPass->record(context, renderItems);
+    }
+    for (ShadowPass *spotShadowPass : spotShadowPasses) {
+      if (spotShadowPass != nullptr) {
+        spotShadowPass->record(context, renderItems);
+      }
+    }
+  }
+
   void drawFrame() {
     auto frameState = backend.beginFrame(window);
 
     if (!frameState.has_value()) {
       backend.recreateSwapchain(window);
+      recreateShadowPasses();
       renderer.recreate(deviceContext(), swapchainContext());
       return;
     }
@@ -388,6 +571,7 @@ private:
     if (pbrPass != nullptr) {
       pbrPass->setCamera(geometryUniformData.proj, geometryUniformData.view);
       pbrPass->setSceneLights(debugUiSettings.sceneLights);
+      pbrPass->clearLightShadows();
       pbrPass->setEnvironmentControls(
           debugUiSettings.environmentRotationRadians,
           debugUiSettings.environmentIntensity *
@@ -400,6 +584,7 @@ private:
       pbrPass->setDielectricSpecularScale(
           debugUiSettings.dielectricSpecularScale);
       pbrPass->setDebugView(debugUiSettings.pbrDebugView);
+      configureShadowPasses(geometryUniformData);
     }
     if (debugOverlayPass != nullptr) {
       debugOverlayPass->setCamera(geometryUniformData.view,
@@ -425,13 +610,21 @@ private:
       tonemapPass->setOperator(debugUiSettings.tonemapOperator);
     }
 
-    renderer.record(backend.commands().commandBuffer(frameState->frameIndex),
-                    swapchainContext(), renderItems, frameState->frameIndex,
-                    frameState->imageIndex);
+    auto &commandBuffer =
+        backend.commands().commandBuffer(frameState->frameIndex);
+    commandBuffer.begin({});
+    RenderPassContext context{.commandBuffer = commandBuffer,
+                              .swapchainContext = swapchainContext(),
+                              .frameIndex = frameState->frameIndex,
+                              .imageIndex = frameState->imageIndex};
+    recordShadowPasses(context);
+    renderer.record(context, renderItems);
+    commandBuffer.end();
 
     bool shouldRecreate = backend.endFrame(*frameState, window);
     if (shouldRecreate) {
       backend.recreateSwapchain(window);
+      recreateShadowPasses();
       renderer.recreate(deviceContext(), swapchainContext());
     }
   }

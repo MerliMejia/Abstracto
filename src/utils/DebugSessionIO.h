@@ -36,6 +36,9 @@ inline json sceneLightToJson(const SceneLight &light) {
       {"direction", vec3ToJson(light.direction)},
       {"innerConeAngleRadians", light.innerConeAngleRadians},
       {"outerConeAngleRadians", light.outerConeAngleRadians},
+      {"castsShadow", light.castsShadow},
+      {"shadowBias", light.shadowBias},
+      {"shadowNormalBias", light.shadowNormalBias},
   };
 }
 
@@ -60,6 +63,14 @@ inline SceneLight sceneLightFromJson(const json &value) {
   light.outerConeAngleRadians = std::max(
       value.value("outerConeAngleRadians", light.outerConeAngleRadians),
       light.innerConeAngleRadians);
+  const bool defaultCastsShadow =
+      light.type == SceneLightType::Directional ||
+      light.type == SceneLightType::Spot;
+  light.castsShadow = value.value("castsShadow", defaultCastsShadow);
+  light.shadowBias =
+      std::max(value.value("shadowBias", light.shadowBias), 0.0f);
+  light.shadowNormalBias =
+      std::max(value.value("shadowNormalBias", light.shadowNormalBias), 0.0f);
   light.normalizeDirection();
   return light;
 }
@@ -157,6 +168,10 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"sceneLights", sceneLights},
       {"lightMarkersVisible", settings.lightMarkersVisible},
       {"lightMarkerScale", settings.lightMarkerScale},
+      {"shadowsEnabled", settings.shadowsEnabled},
+      {"directionalShadowExtent", settings.directionalShadowExtent},
+      {"directionalShadowNearPlane", settings.directionalShadowNearPlane},
+      {"directionalShadowFarPlane", settings.directionalShadowFarPlane},
       {"exposure", settings.exposure},
       {"autoExposureKey", settings.autoExposureKey},
       {"whitePoint", settings.whitePoint},
@@ -210,6 +225,19 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       value.value("lightMarkersVisible", settings.lightMarkersVisible);
   settings.lightMarkerScale = std::max(
       value.value("lightMarkerScale", settings.lightMarkerScale), 0.01f);
+  settings.shadowsEnabled =
+      value.value("shadowsEnabled", settings.shadowsEnabled);
+  settings.directionalShadowExtent = std::max(
+      value.value("directionalShadowExtent", settings.directionalShadowExtent),
+      0.5f);
+  settings.directionalShadowNearPlane =
+      std::max(value.value("directionalShadowNearPlane",
+                           settings.directionalShadowNearPlane),
+               0.01f);
+  settings.directionalShadowFarPlane =
+      std::max(value.value("directionalShadowFarPlane",
+                           settings.directionalShadowFarPlane),
+               settings.directionalShadowNearPlane + 0.5f);
   settings.exposure = value.value("exposure", settings.exposure);
   settings.autoExposureKey =
       value.value("autoExposureKey", settings.autoExposureKey);

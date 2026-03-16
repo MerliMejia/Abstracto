@@ -2,9 +2,13 @@
 
 #include "../renderer/FullscreenRenderPass.h"
 #include "GeometryPass.h"
+#include "ShadowPass.h"
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+
+constexpr uint32_t MAX_DEBUG_SPOT_SHADOW_MAPS = 3;
 
 struct DebugPresentPassPushConstant {
   uint32_t selectedOutput = 0;
@@ -18,7 +22,10 @@ public:
   DebugPresentPass(PipelineSpec spec, uint32_t framesInFlight,
                    const GeometryPass *sourcePass = nullptr,
                    const RasterRenderPass *lightPass = nullptr,
-                   const RasterRenderPass *tonemapPass = nullptr)
+                   const RasterRenderPass *tonemapPass = nullptr,
+                   const ShadowPass *directionalShadowPass = nullptr,
+                   std::array<ShadowPass *, MAX_DEBUG_SPOT_SHADOW_MAPS>
+                       spotShadowPasses = {nullptr, nullptr, nullptr})
       : FullscreenRenderPass(std::move(spec), framesInFlight,
                              RasterPassAttachmentConfig{
                                  .useColorAttachment = true,
@@ -28,7 +35,12 @@ public:
                                  .useSwapchainColorAttachment = true,
                              }),
         sourcePassRef(sourcePass), lightPassRef(lightPass),
-        tonemapPassRef(tonemapPass) {}
+        tonemapPassRef(tonemapPass),
+        directionalShadowPassRef(directionalShadowPass) {
+    for (uint32_t index = 0; index < MAX_DEBUG_SPOT_SHADOW_MAPS; ++index) {
+      spotShadowPassRefs[index] = spotShadowPasses[index];
+    }
+  }
 
   void setSourcePass(const GeometryPass &sourcePass) {
     sourcePassRef = &sourcePass;
@@ -42,6 +54,14 @@ public:
     tonemapPassRef = &tonemapPass;
   }
 
+  void setDirectionalShadowPass(const ShadowPass &shadowPass) {
+    directionalShadowPassRef = &shadowPass;
+  }
+
+  void setSpotShadowPass(uint32_t index, const ShadowPass &shadowPass) {
+    spotShadowPassRefs.at(index) = &shadowPass;
+  }
+
   void setSelectedOutput(uint32_t index) { selectedOutput = index; }
 
   void setClipPlanes(float nearPlaneValue, float farPlaneValue) {
@@ -52,8 +72,9 @@ public:
 protected:
   std::vector<FullscreenImageInputBinding> imageInputBindings() const override {
     return {
-        {.binding = 0}, {.binding = 1}, {.binding = 2}, {.binding = 3},
-        {.binding = 4}, {.binding = 5}, {.binding = 6},
+        {.binding = 0}, {.binding = 1}, {.binding = 2},  {.binding = 3},
+        {.binding = 4}, {.binding = 5}, {.binding = 6},  {.binding = 7},
+        {.binding = 8}, {.binding = 9}, {.binding = 10},
     };
   }
 
@@ -91,6 +112,14 @@ protected:
         {.binding = 4, .resource = sourcePassRef->sampledDepthOutput(sampler)},
         {.binding = 5, .resource = lightPassRef->sampledColorOutput(sampler)},
         {.binding = 6, .resource = tonemapPassRef->sampledColorOutput(sampler)},
+        {.binding = 7,
+         .resource = directionalShadowPassRef->sampledShadowOutput()},
+        {.binding = 8,
+         .resource = spotShadowPassRefs[0]->sampledShadowOutput()},
+        {.binding = 9,
+         .resource = spotShadowPassRefs[1]->sampledShadowOutput()},
+        {.binding = 10,
+         .resource = spotShadowPassRefs[2]->sampledShadowOutput()},
     };
   }
 
@@ -108,6 +137,9 @@ private:
   const GeometryPass *sourcePassRef = nullptr;
   const RasterRenderPass *lightPassRef = nullptr;
   const RasterRenderPass *tonemapPassRef = nullptr;
+  const ShadowPass *directionalShadowPassRef = nullptr;
+  std::array<const ShadowPass *, MAX_DEBUG_SPOT_SHADOW_MAPS> spotShadowPassRefs{
+      nullptr, nullptr, nullptr};
   uint32_t selectedOutput = 0;
   float nearPlane = 0.1f;
   float farPlane = 100.0f;
@@ -123,6 +155,16 @@ private:
     if (tonemapPassRef == nullptr) {
       throw std::runtime_error(
           "DebugPresentPass requires a tonemap source pass");
+    }
+    if (directionalShadowPassRef == nullptr) {
+      throw std::runtime_error(
+          "DebugPresentPass requires a directional shadow pass");
+    }
+    for (const ShadowPass *shadowPass : spotShadowPassRefs) {
+      if (shadowPass == nullptr) {
+        throw std::runtime_error(
+            "DebugPresentPass requires all spot shadow passes");
+      }
     }
   }
 };

@@ -69,11 +69,18 @@ struct RasterPassAttachmentConfig {
   vk::AttachmentStoreOp colorStoreOp = vk::AttachmentStoreOp::eStore;
   vk::AttachmentLoadOp depthLoadOp = vk::AttachmentLoadOp::eClear;
   vk::AttachmentStoreOp depthStoreOp = vk::AttachmentStoreOp::eStore;
+  vk::Extent2D renderExtent{};
 
   // If non-empty, these replace the legacy single-color attachment fields
   // above and enable explicit multi-output pass declarations.
   std::vector<RasterColorAttachmentConfig> colorAttachments;
   bool sampleDepthAttachment = false;
+};
+
+struct RasterDepthBiasState {
+  float constantFactor = 0.0f;
+  float clamp = 0.0f;
+  float slopeFactor = 0.0f;
 };
 
 using MeshPassAttachmentConfig = RasterPassAttachmentConfig;
@@ -115,10 +122,10 @@ public:
 
     auto colorAttachments = buildColorAttachments(context);
     auto depthAttachment = buildDepthAttachment();
+    const vk::Extent2D targetExtent = renderExtent(context);
 
     vk::RenderingInfo renderingInfo = {
-        .renderArea = {.offset = {0, 0},
-                       .extent = context.swapchainContext.extent2D()},
+        .renderArea = {.offset = {0, 0}, .extent = targetExtent},
         .layerCount = 1,
         .colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size()),
         .pColorAttachments =
@@ -129,13 +136,17 @@ public:
     context.commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                        *graphicsPipeline);
     context.commandBuffer.setViewport(
-        0, vk::Viewport(
-               0.0f, 0.0f,
-               static_cast<float>(context.swapchainContext.extent2D().width),
-               static_cast<float>(context.swapchainContext.extent2D().height),
-               0.0f, 1.0f));
+        0, vk::Viewport(0.0f, 0.0f, static_cast<float>(targetExtent.width),
+                        static_cast<float>(targetExtent.height), 0.0f, 1.0f));
     context.commandBuffer.setScissor(
-        0, vk::Rect2D(vk::Offset2D(0, 0), context.swapchainContext.extent2D()));
+        0, vk::Rect2D(vk::Offset2D(0, 0), targetExtent));
+    if (spec.enableDepthBias) {
+      const RasterDepthBiasState bias =
+          depthBiasState().value_or(RasterDepthBiasState{
+              .constantFactor = 0.0f, .clamp = 0.0f, .slopeFactor = 0.0f});
+      context.commandBuffer.setDepthBias(bias.constantFactor, bias.clamp,
+                                         bias.slopeFactor);
+    }
 
     bindPassResources(context);
     recordDrawCommands(context, renderItems);
@@ -295,6 +306,10 @@ protected:
 
   virtual void bindPassResources(const RenderPassContext &context) {}
 
+  virtual std::optional<RasterDepthBiasState> depthBiasState() const {
+    return std::nullopt;
+  }
+
   virtual void
   recordDrawCommands(const RenderPassContext &context,
                      const std::vector<RenderItem> &renderItems) = 0;
@@ -302,6 +317,15 @@ protected:
   const PipelineSpec &pipelineSpec() const { return spec; }
   const RasterPassAttachmentConfig &attachmentConfig() const {
     return attachments;
+  }
+
+  vk::Extent2D renderExtent(const RenderPassContext &context) const {
+    return renderExtent(context.swapchainContext);
+  }
+
+  vk::Extent2D renderExtent(const SwapchainContext &swapchainContext) const {
+    return hasCustomRenderExtent() ? attachments.renderExtent
+                                   : swapchainContext.extent2D();
   }
 
   vk::raii::PipelineLayout &pipelineLayoutHandle() { return pipelineLayout; }
@@ -414,7 +438,7 @@ private:
         .polygonMode = spec.polygonMode,
         .cullMode = spec.cullMode,
         .frontFace = spec.frontFace,
-        .depthBiasEnable = vk::False,
+        .depthBiasEnable = spec.enableDepthBias ? vk::True : vk::False,
         .lineWidth = 1.0f};
     vk::PipelineMultisampleStateCreateInfo multisampling{
         .rasterizationSamples = rasterizationSampleCount(deviceContext),
@@ -449,6 +473,9 @@ private:
                             : colorBlendAttachments.data()};
     std::vector dynamicStates = {vk::DynamicState::eViewport,
                                  vk::DynamicState::eScissor};
+    if (spec.enableDepthBias) {
+      dynamicStates.push_back(vk::DynamicState::eDepthBias);
+    }
     vk::PipelineDynamicStateCreateInfo dynamicState{
         .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
         .pDynamicStates = dynamicStates.data()};
@@ -522,8 +549,9 @@ private:
       imageUsage |= vk::ImageUsageFlagBits::eSampled;
     }
 
-    RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
-                             swapchainContext.extent2D().height, 1, 1,
+    RenderUtils::createImage(deviceContext,
+                             renderExtent(swapchainContext).width,
+                             renderExtent(swapchainContext).height, 1, 1,
                              rasterizationSampleCount(deviceContext),
                              colorFormat, vk::ImageTiling::eOptimal, imageUsage,
                              vk::MemoryPropertyFlagBits::eDeviceLocal,
@@ -543,12 +571,12 @@ private:
       usage |= vk::ImageUsageFlagBits::eSampled;
     }
 
-    RenderUtils::createImage(deviceContext, swapchainContext.extent2D().width,
-                             swapchainContext.extent2D().height, 1, 1,
-                             rasterizationSampleCount(deviceContext),
-                             depthFormat, vk::ImageTiling::eOptimal, usage,
-                             vk::MemoryPropertyFlagBits::eDeviceLocal,
-                             depthImage, depthImageMemory);
+    RenderUtils::createImage(
+        deviceContext, renderExtent(swapchainContext).width,
+        renderExtent(swapchainContext).height, 1, 1,
+        rasterizationSampleCount(deviceContext), depthFormat,
+        vk::ImageTiling::eOptimal, usage,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, depthImage, depthImageMemory);
     depthImageViewHandle =
         createImageView(deviceContext, depthImage, depthFormat,
                         vk::ImageAspectFlagBits::eDepth, 1);
@@ -796,6 +824,11 @@ private:
 
   bool usesExplicitColorAttachments() const {
     return !attachments.colorAttachments.empty();
+  }
+
+  bool hasCustomRenderExtent() const {
+    return attachments.renderExtent.width > 0 &&
+           attachments.renderExtent.height > 0;
   }
 
   RasterColorAttachmentConfig colorAttachmentConfig(uint32_t index) const {

@@ -19,6 +19,9 @@ struct PbrLightData {
     float4 directionAndRange;
     float4 colorAndRadiance;
     float4 spotAngles;
+    float4x4 shadowMatrix;
+    float4 shadowParams;
+    uint4 shadowInfo;
 };
 
 struct PbrFrameData {
@@ -42,6 +45,10 @@ struct PbrFrameData {
 [[vk::binding(6, 0)]] SamplerCube irradianceMap;
 [[vk::binding(7, 0)]] SamplerCube prefilteredEnvironmentMap;
 [[vk::binding(8, 0)]] Sampler2D brdfLut;
+[[vk::binding(9, 0)]] Sampler2D shadowMap0;
+[[vk::binding(10, 0)]] Sampler2D shadowMap1;
+[[vk::binding(11, 0)]] Sampler2D shadowMap2;
+[[vk::binding(12, 0)]] Sampler2D shadowMap3;
 
 [[vk::binding(0, 1)]]
 ConstantBuffer<PbrFrameData> pbrFrame;
@@ -149,6 +156,56 @@ float SpotAttenuation(float3 lightToSurfaceDirection, float3 lightDirection,
     return saturate((coneAmount - cosOuter) / max(cosInner - cosOuter, 1e-4));
 }
 
+float SampleShadowDepth(uint shadowMapIndex, float2 uv) {
+    if (shadowMapIndex == 0) {
+        return shadowMap0.Sample(uv).r;
+    }
+    if (shadowMapIndex == 1) {
+        return shadowMap1.Sample(uv).r;
+    }
+    if (shadowMapIndex == 2) {
+        return shadowMap2.Sample(uv).r;
+    }
+    return shadowMap3.Sample(uv).r;
+}
+
+float ComputeShadowVisibility(PbrLightData light, float3 worldPos, float3 worldNormal) {
+    if (light.shadowInfo.x == 0) {
+        return 1.0;
+    }
+
+    float3 biasedWorldPos = worldPos + worldNormal * light.shadowParams.y;
+    float4 shadowClip = mul(light.shadowMatrix, float4(biasedWorldPos, 1.0));
+    if (abs(shadowClip.w) <= 1e-5) {
+        return 1.0;
+    }
+
+    float3 shadowNdc = shadowClip.xyz / shadowClip.w;
+    float2 shadowUv = shadowNdc.xy * 0.5 + 0.5;
+    if (shadowUv.x <= 0.0 || shadowUv.x >= 1.0 ||
+        shadowUv.y <= 0.0 || shadowUv.y >= 1.0 ||
+        shadowNdc.z <= 0.0 || shadowNdc.z >= 1.0) {
+        return 1.0;
+    }
+
+    float currentDepth = shadowNdc.z - light.shadowParams.x;
+    float texelSize = max(light.shadowParams.z, 1e-5);
+    float visibility = 0.0;
+
+    [unroll]
+    for (int y = -1; y <= 1; ++y) {
+        [unroll]
+        for (int x = -1; x <= 1; ++x) {
+            float2 offset = float2((float)x, (float)y) * texelSize;
+            float sampledDepth =
+                SampleShadowDepth(light.shadowInfo.y, shadowUv + offset);
+            visibility += currentDepth <= sampledDepth ? 1.0 : 0.0;
+        }
+    }
+
+    return visibility / 9.0;
+}
+
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_TARGET {
     float depth = gbufferDepth.Sample(input.uv).r;
@@ -243,7 +300,14 @@ float4 fragMain(VSOutput input) : SV_TARGET {
         float3 directKs = directF;
         float3 directKd = (1.0 - directKs) * (1.0 - metallic);
         float3 diffuse = directKd * albedo / PI;
-        directLighting += (diffuse + specular) * radiance * attenuation * NdotL;
+        float shadowVisibility = 1.0;
+        if (lightType == PBR_LIGHT_TYPE_DIRECTIONAL ||
+            lightType == PBR_LIGHT_TYPE_SPOT) {
+            shadowVisibility =
+                ComputeShadowVisibility(light, worldPos, worldNormal);
+        }
+        directLighting +=
+            (diffuse + specular) * radiance * attenuation * NdotL * shadowVisibility;
     }
 
     if (enableIbl) {

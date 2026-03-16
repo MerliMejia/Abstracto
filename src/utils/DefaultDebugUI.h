@@ -25,6 +25,10 @@ enum class PresentedOutput : uint32_t {
   GeometryPass = 5,
   PbrPass = 6,
   TonemapPass = 7,
+  DirectionalShadow = 8,
+  SpotShadow0 = 9,
+  SpotShadow1 = 10,
+  SpotShadow2 = 11,
 };
 
 struct DefaultDebugUISettings {
@@ -36,6 +40,10 @@ struct DefaultDebugUISettings {
   SceneLightSet sceneLights = SceneLightSet::showcaseLights();
   bool lightMarkersVisible = true;
   float lightMarkerScale = 0.35f;
+  bool shadowsEnabled = true;
+  float directionalShadowExtent = 12.0f;
+  float directionalShadowNearPlane = 0.1f;
+  float directionalShadowFarPlane = 24.0f;
 
   float exposure = 1.0f;
   float autoExposureKey = 2.5f;
@@ -365,6 +373,18 @@ private:
     ImGui::SeparatorText("Scene Lights");
     ImGui::Checkbox("Show Markers", &settings.lightMarkersVisible);
     ImGui::SliderFloat("Marker Scale", &settings.lightMarkerScale, 0.05f, 2.5f);
+    ImGui::Checkbox("Enable Shadows", &settings.shadowsEnabled);
+    ImGui::SliderFloat("Directional Shadow Extent",
+                       &settings.directionalShadowExtent, 1.0f, 40.0f, "%.2f");
+    ImGui::SliderFloat("Directional Shadow Near",
+                       &settings.directionalShadowNearPlane, 0.01f, 5.0f,
+                       "%.2f");
+    ImGui::SliderFloat("Directional Shadow Far",
+                       &settings.directionalShadowFarPlane, 1.0f, 80.0f,
+                       "%.2f");
+    settings.directionalShadowFarPlane =
+        std::max(settings.directionalShadowFarPlane,
+                 settings.directionalShadowNearPlane + 0.5f);
     for (int index = 0; index < static_cast<int>(lights.size()); ++index) {
       const SceneLight &light = lights[static_cast<size_t>(index)];
       std::string label = light.name + "##light_" + std::to_string(index);
@@ -383,6 +403,23 @@ private:
     ImGui::DragFloat("Power", &light.power, 0.1f, 0.0f, 10000.0f, "%.3f");
     light.power = std::max(light.power, 0.0f);
     ImGui::SliderFloat("Exposure", &light.exposure, -16.0f, 16.0f, "%.3f");
+    if (light.type == SceneLightType::Directional ||
+        light.type == SceneLightType::Spot) {
+      ImGui::SeparatorText("Shadowing");
+      ImGui::Checkbox("Casts Shadow", &light.castsShadow);
+      ImGui::SliderFloat("Shadow Bias", &light.shadowBias, 0.0001f, 0.02f,
+                         "%.4f");
+      ImGui::SliderFloat("Shadow Normal Bias", &light.shadowNormalBias, 0.0f,
+                         0.2f, "%.4f");
+    } else {
+      bool pointShadowDisabled = false;
+      ImGui::SeparatorText("Shadowing");
+      ImGui::BeginDisabled();
+      ImGui::Checkbox("Casts Shadow", &pointShadowDisabled);
+      ImGui::EndDisabled();
+      light.castsShadow = false;
+      ImGui::TextUnformatted("Point-light shadows are not implemented yet.");
+    }
 
     if (light.type == SceneLightType::Directional) {
       ImGui::BeginDisabled();
@@ -496,6 +533,16 @@ private:
                        static_cast<int>(PresentedOutput::PbrPass));
     ImGui::RadioButton("Tone Mapping Pass", &output,
                        static_cast<int>(PresentedOutput::TonemapPass));
+
+    ImGui::SeparatorText("Shadow Maps");
+    ImGui::RadioButton("Directional Shadow", &output,
+                       static_cast<int>(PresentedOutput::DirectionalShadow));
+    ImGui::RadioButton("Spot Shadow 1", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow0));
+    ImGui::RadioButton("Spot Shadow 2", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow1));
+    ImGui::RadioButton("Spot Shadow 3", &output,
+                       static_cast<int>(PresentedOutput::SpotShadow2));
 
     settings.presentedOutput = static_cast<PresentedOutput>(output);
     ImGui::End();

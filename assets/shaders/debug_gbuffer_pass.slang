@@ -28,6 +28,10 @@ float LinearizeDepth(float depth, float nearPlane, float farPlane) {
 [[vk::binding(4, 0)]] Sampler2D gbufferDepth;
 [[vk::binding(5, 0)]] Sampler2D lightPassColor;
 [[vk::binding(6, 0)]] Sampler2D tonemapPassColor;
+[[vk::binding(7, 0)]] Sampler2D directionalShadowMap;
+[[vk::binding(8, 0)]] Sampler2D spotShadowMap0;
+[[vk::binding(9, 0)]] Sampler2D spotShadowMap1;
+[[vk::binding(10, 0)]] Sampler2D spotShadowMap2;
 
 [[vk::push_constant]]
 ConstantBuffer<DebugPushConstant> debugPush;
@@ -86,5 +90,29 @@ float4 fragMain(VSOutput input) : SV_TARGET {
         return float4(hdr / (1.0 + hdr), 1.0);
     }
 
-    return tonemapPassColor.Sample(input.uv);
+    if (debugPush.selectedOutput == 7) {
+        return tonemapPassColor.Sample(input.uv);
+    }
+
+    if (debugPush.selectedOutput == 8) {
+        float depth = directionalShadowMap.Sample(input.uv).r;
+        return float4((1.0 - depth).xxx, 1.0);
+    }
+
+    if (debugPush.selectedOutput == 9) {
+        float depth = spotShadowMap0.Sample(input.uv).r;
+        return float4((1.0 - depth).xxx, 1.0);
+    }
+
+    if (debugPush.selectedOutput == 10) {
+        float depth = spotShadowMap1.Sample(input.uv).r;
+        return float4((1.0 - depth).xxx, 1.0);
+    }
+
+    if (debugPush.selectedOutput == 11) {
+        float depth = spotShadowMap2.Sample(input.uv).r;
+        return float4((1.0 - depth).xxx, 1.0);
+    }
+
+    return float4(1.0, 0.0, 1.0, 1.0);
 }

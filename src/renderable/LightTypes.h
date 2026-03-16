@@ -29,12 +29,15 @@ struct SceneLight {
   float radius = 0.25f;
   float innerConeAngleRadians = glm::radians(18.0f);
   float outerConeAngleRadians = glm::radians(28.0f);
+  bool castsShadow = false;
+  float shadowBias = 0.0015f;
+  float shadowNormalBias = 0.02f;
 
-  static SceneLight
-  directional(const std::string &name = "Directional Light",
-              glm::vec3 direction = glm::vec3(0.0f, -1.0f, -1.0f),
-              glm::vec3 color = glm::vec3(1.0f), float power = 3.0f,
-              float exposure = 0.0f) {
+  static SceneLight directional(const std::string &name = "Directional Light",
+                                glm::vec3 direction = glm::vec3(0.0f, -1.0f,
+                                                                -1.0f),
+                                glm::vec3 color = glm::vec3(1.0f),
+                                float power = 3.0f, float exposure = 0.0f) {
     SceneLight light;
     light.name = name;
     light.type = SceneLightType::Directional;
@@ -43,6 +46,7 @@ struct SceneLight {
     light.color = color;
     light.power = std::max(power, 0.0f);
     light.exposure = exposure;
+    light.castsShadow = true;
     return light;
   }
 
@@ -66,9 +70,8 @@ struct SceneLight {
   static SceneLight spot(const std::string &name = "Spot Light",
                          glm::vec3 position = glm::vec3(0.0f),
                          glm::vec3 direction = glm::vec3(0.0f, -1.0f, -1.0f),
-                         glm::vec3 color = glm::vec3(1.0f),
-                         float power = 18.0f, float exposure = 0.0f,
-                         float range = 10.0f,
+                         glm::vec3 color = glm::vec3(1.0f), float power = 18.0f,
+                         float exposure = 0.0f, float range = 10.0f,
                          float innerConeAngleRadians = glm::radians(18.0f),
                          float outerConeAngleRadians = glm::radians(28.0f)) {
     SceneLight light;
@@ -86,6 +89,7 @@ struct SceneLight {
     light.outerConeAngleRadians =
         std::max(light.innerConeAngleRadians,
                  std::clamp(outerConeAngleRadians, 0.0f, glm::radians(89.0f)));
+    light.castsShadow = true;
     return light;
   }
 

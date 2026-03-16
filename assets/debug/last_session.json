@@ -4,21 +4,24 @@
   "cameraFarPlane": 100.0,
   "cameraLookSensitivity": 0.0035000001080334187,
   "cameraMoveSpeed": 5.434000015258789,
-  "cameraPitchRadians": -0.1531803011894226,
+  "cameraPitchRadians": -0.12433244287967682,
   "cameraPosition": [
-    2.290891647338867,
-    8.502569198608398,
-    25.57532501220703
+    2.391505718231201,
+    8.74266529083252,
+    28.104976654052734
   ],
-  "cameraYawRadians": -6.2983784675598145,
-  "dielectricSpecularScale": 0.5,
-  "environmentBackgroundWeight": 0.7260000109672546,
-  "environmentDiffuseWeight": 1.0390000343322754,
-  "environmentIntensity": 2.4630000591278076,
-  "environmentRotationRadians": 1.7278759479522705,
-  "environmentSpecularWeight": 1.3919999599456787,
-  "exposure": 1.184999942779541,
-  "gamma": 1.5160000324249268,
+  "cameraYawRadians": -6.316416263580322,
+  "dielectricSpecularScale": 1.7109999656677246,
+  "directionalShadowExtent": 1.0,
+  "directionalShadowFarPlane": 1.0,
+  "directionalShadowNearPlane": 0.009999999776482582,
+  "environmentBackgroundWeight": 1.2309999465942383,
+  "environmentDiffuseWeight": 0.7440000176429749,
+  "environmentIntensity": 1.2000000476837158,
+  "environmentRotationRadians": 2.059488534927368,
+  "environmentSpecularWeight": 2.697000026702881,
+  "exposure": 0.6830000281333923,
+  "gamma": 1.1699999570846558,
   "iblBakeSettings": {
     "brdfResolution": 256,
     "brdfSamples": 128,
@@ -60,8 +63,8 @@
     }
   },
   "iblEnabled": true,
-  "lightMarkerScale": 0.5690000057220459,
-  "lightMarkersVisible": true,
+  "lightMarkerScale": 1.8070000410079956,
+  "lightMarkersVisible": false,
   "modelPosition": [
     0.0,
     0.0,
@@ -81,6 +84,7 @@
   "presentedOutput": 7,
   "sceneLights": [
     {
+      "castsShadow": false,
       "color": [
         1.0,
         1.0,
@@ -92,23 +96,84 @@
         0.0
       ],
       "enabled": true,
-      "exposure": 7.072999954223633,
+      "exposure": 6.007999897003174,
       "innerConeAngleRadians": 0.3141592741012573,
       "name": "Point Light",
       "outerConeAngleRadians": 0.48869219422340393,
       "position": [
         0.0,
-        9.649999618530273,
+        9.399999618530273,
         0.0
       ],
-      "power": 58.099998474121094,
-      "radius": 6.760000228881836,
+      "power": 33.70000076293945,
+      "radius": 2.759999990463257,
       "range": 25.0,
+      "shadowBias": 0.001500000013038516,
+      "shadowNormalBias": 0.019999999552965164,
       "type": 1
+    },
+    {
+      "castsShadow": true,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "direction": [
+        0.010890656150877476,
+        0.9999365210533142,
+        -0.0028972425498068333
+      ],
+      "enabled": true,
+      "exposure": 7.51200008392334,
+      "innerConeAngleRadians": 1.1602773666381836,
+      "name": "Spot Light",
+      "outerConeAngleRadians": 1.1602773666381836,
+      "position": [
+        0.0,
+        7.449999809265137,
+        0.0
+      ],
+      "power": 37.20000076293945,
+      "radius": 0.25,
+      "range": 22.652999877929688,
+      "shadowBias": 9.999999747378752e-05,
+      "shadowNormalBias": 0.0,
+      "type": 2
+    },
+    {
+      "castsShadow": true,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "direction": [
+        0.03336448222398758,
+        -0.9994391798973083,
+        -0.002879789564758539
+      ],
+      "enabled": true,
+      "exposure": 10.815999984741211,
+      "innerConeAngleRadians": 1.0498853921890259,
+      "name": "Spot Light",
+      "outerConeAngleRadians": 1.4402631521224976,
+      "position": [
+        0.0,
+        9.949999809265137,
+        0.0
+      ],
+      "power": 3.4000000953674316,
+      "radius": 0.25,
+      "range": 25.0,
+      "shadowBias": 9.999999747378752e-05,
+      "shadowNormalBias": 0.0,
+      "type": 2
     }
   ],
-  "selectedLightIndex": 0,
-  "selectedMaterialIndex": 0,
+  "selectedLightIndex": 2,
+  "selectedMaterialIndex": 5,
+  "shadowsEnabled": true,
   "skyboxVisible": true,
   "syncSkySunToLight": true,
   "tonemapOperator": 2,
