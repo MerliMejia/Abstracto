@@ -59,6 +59,13 @@ private:
   DeviceContext &deviceContext() { return backend.device(); }
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
+  vk::raii::DescriptorSetLayout &sceneDescriptorSetLayout() {
+    if (geometryPass == nullptr || geometryPass->descriptorSetLayout() == nullptr) {
+      throw std::runtime_error(
+          "GeometryPass descriptor set layout is not available");
+    }
+    return *geometryPass->descriptorSetLayout();
+  }
 
   PassRenderer renderer;
   std::vector<RenderItem> renderItems;
@@ -71,9 +78,6 @@ private:
   FrameGeometryUniforms frameGeometryUniforms;
   Sampler sampler;
   ImageBasedLighting imageBasedLighting;
-  std::unique_ptr<ShadowPass> directionalShadowPassStorage;
-  std::array<std::unique_ptr<ShadowPass>, MAX_SPOT_SHADOW_PASSES>
-      spotShadowPassStorage;
   GeometryPass *geometryPass = nullptr;
   ShadowPass *directionalShadowPass = nullptr;
   std::array<ShadowPass *, MAX_SPOT_SHADOW_PASSES> spotShadowPasses{
@@ -139,7 +143,7 @@ private:
   void reloadSceneModel() {
     backend.waitIdle();
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(),
+                            sceneDescriptorSetLayout(),
                             frameGeometryUniforms, sampler,
                             MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
@@ -170,41 +174,29 @@ private:
     }
     imageBasedLighting.rebuild(deviceContext(), commandContext(),
                                debugUiSettings.iblBakeSettings);
-    recreateShadowPasses();
     renderer.recreate(deviceContext(), swapchainContext());
     reloadSceneModel();
   }
 
-  void initializeShadowPasses() {
-    directionalShadowPassStorage = std::make_unique<ShadowPass>(
+  void registerShadowPasses() {
+    auto directionalShadowPassLocal = std::make_unique<ShadowPass>(
         PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
                      .cullMode = vk::CullModeFlagBits::eBack,
                      .frontFace = vk::FrontFace::eCounterClockwise,
                      .enableDepthBias = true},
         MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
-    directionalShadowPass = directionalShadowPassStorage.get();
-    directionalShadowPass->initialize(deviceContext(), swapchainContext());
+    directionalShadowPass = directionalShadowPassLocal.get();
+    renderer.addPass(std::move(directionalShadowPassLocal));
 
     for (uint32_t index = 0; index < MAX_SPOT_SHADOW_PASSES; ++index) {
-      spotShadowPassStorage[index] = std::make_unique<ShadowPass>(
+      auto spotShadowPassLocal = std::make_unique<ShadowPass>(
           PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
                        .cullMode = vk::CullModeFlagBits::eBack,
                        .frontFace = vk::FrontFace::eCounterClockwise,
                        .enableDepthBias = true},
           MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
-      spotShadowPasses[index] = spotShadowPassStorage[index].get();
-      spotShadowPasses[index]->initialize(deviceContext(), swapchainContext());
-    }
-  }
-
-  void recreateShadowPasses() {
-    if (directionalShadowPass != nullptr) {
-      directionalShadowPass->recreate(deviceContext(), swapchainContext());
-    }
-    for (ShadowPass *spotShadowPass : spotShadowPasses) {
-      if (spotShadowPass != nullptr) {
-        spotShadowPass->recreate(deviceContext(), swapchainContext());
-      }
+      spotShadowPasses[index] = spotShadowPassLocal.get();
+      renderer.addPass(std::move(spotShadowPassLocal));
     }
   }
 
@@ -213,7 +205,7 @@ private:
     ensureDefaultEnvironmentPath();
 
     sampler.create(deviceContext());
-    initializeShadowPasses();
+    registerShadowPasses();
 
     lightQuad = buildFullscreenQuadMesh();
     lightQuad.createVertexBuffer(commandContext(), deviceContext());
@@ -308,7 +300,7 @@ private:
 
     frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            renderer.descriptorSetLayout(),
+                            sceneDescriptorSetLayout(),
                             frameGeometryUniforms, sampler,
                             MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
@@ -444,23 +436,11 @@ private:
     }
   }
 
-  void recordShadowPasses(const RenderPassContext &context) {
-    if (directionalShadowPass != nullptr) {
-      directionalShadowPass->record(context, renderItems);
-    }
-    for (ShadowPass *spotShadowPass : spotShadowPasses) {
-      if (spotShadowPass != nullptr) {
-        spotShadowPass->record(context, renderItems);
-      }
-    }
-  }
-
   void drawFrame() {
     auto frameState = backend.beginFrame(window);
 
     if (!frameState.has_value()) {
       backend.recreateSwapchain(window);
-      recreateShadowPasses();
       renderer.recreate(deviceContext(), swapchainContext());
       return;
     }
@@ -617,14 +597,12 @@ private:
                               .swapchainContext = swapchainContext(),
                               .frameIndex = frameState->frameIndex,
                               .imageIndex = frameState->imageIndex};
-    recordShadowPasses(context);
     renderer.record(context, renderItems);
     commandBuffer.end();
 
     bool shouldRecreate = backend.endFrame(*frameState, window);
     if (shouldRecreate) {
       backend.recreateSwapchain(window);
-      recreateShadowPasses();
       renderer.recreate(deviceContext(), swapchainContext());
     }
   }

@@ -59,10 +59,11 @@ protected:
   }
 
   VertexInputLayoutSpec vertexInputLayout() const override {
-    auto attrs = GeometryVertex::getAttributeDescriptions();
     return VertexInputLayoutSpec{
         .bindings = {GeometryVertex::getBindingDescription()},
-        .attributes = {attrs.begin(), attrs.end()},
+        .attributes = {vk::VertexInputAttributeDescription(
+            0, 0, vk::Format::eR32G32B32Sfloat,
+            offsetof(GeometryVertex, pos))},
     };
   }
 

@@ -64,7 +64,7 @@
   },
   "iblEnabled": true,
   "lightMarkerScale": 1.8070000410079956,
-  "lightMarkersVisible": false,
+  "lightMarkersVisible": true,
   "modelPosition": [
     0.0,
     0.0,
@@ -125,18 +125,18 @@
         -0.0028972425498068333
       ],
       "enabled": true,
-      "exposure": 7.51200008392334,
-      "innerConeAngleRadians": 1.1602773666381836,
+      "exposure": 6.215000152587891,
+      "innerConeAngleRadians": 0.991870641708374,
       "name": "Spot Light",
-      "outerConeAngleRadians": 1.1602773666381836,
+      "outerConeAngleRadians": 1.2701982259750366,
       "position": [
         0.0,
-        7.449999809265137,
+        7.949999809265137,
         0.0
       ],
-      "power": 37.20000076293945,
+      "power": 47.5,
       "radius": 0.25,
-      "range": 22.652999877929688,
+      "range": 17.356000900268555,
       "shadowBias": 9.999999747378752e-05,
       "shadowNormalBias": 0.0,
       "type": 2
@@ -171,7 +171,7 @@
       "type": 2
     }
   ],
-  "selectedLightIndex": 2,
+  "selectedLightIndex": 1,
   "selectedMaterialIndex": 5,
   "shadowsEnabled": true,
   "skyboxVisible": true,

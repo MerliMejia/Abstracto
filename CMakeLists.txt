@@ -126,44 +126,32 @@ target_compile_definitions(
 )
 
 set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/assets/shaders)
-set(ABSTRACTO_SLANG_SOURCES
-  ${ABSTRACTO_SHADER_DIR}/test_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/debug_gbuffer_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/debug_overlay_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/geometry_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/light_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/pbr_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/shadow_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/tonemap_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/solid_transform_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/texture_pass.slang
-  ${ABSTRACTO_SHADER_DIR}/debug_present_pass.slang
+file(GLOB ABSTRACTO_SLANG_SOURCES CONFIGURE_DEPENDS
+  "${ABSTRACTO_SHADER_DIR}/*.slang"
 )
 
 find_program(ABSTRACTO_SLANGC_EXECUTABLE NAMES slangc)
 set(ABSTRACTO_SLANG_OUTPUTS)
 foreach(ABSTRACTO_SLANG_SOURCE IN LISTS ABSTRACTO_SLANG_SOURCES)
-    if(EXISTS ${ABSTRACTO_SLANG_SOURCE})
-        get_filename_component(ABSTRACTO_SLANG_NAME
-                           ${ABSTRACTO_SLANG_SOURCE} NAME_WE)
-        set(ABSTRACTO_SLANG_OUTPUT
-        ${ABSTRACTO_SHADER_DIR}/${ABSTRACTO_SLANG_NAME}.spv)
-        list(APPEND ABSTRACTO_SLANG_OUTPUTS ${ABSTRACTO_SLANG_OUTPUT})
+    get_filename_component(ABSTRACTO_SLANG_NAME
+                       ${ABSTRACTO_SLANG_SOURCE} NAME_WE)
+    set(ABSTRACTO_SLANG_OUTPUT
+    ${ABSTRACTO_SHADER_DIR}/${ABSTRACTO_SLANG_NAME}.spv)
+    list(APPEND ABSTRACTO_SLANG_OUTPUTS ${ABSTRACTO_SLANG_OUTPUT})
 
-        if(ABSTRACTO_SLANGC_EXECUTABLE)
-            add_custom_command(
-        OUTPUT ${ABSTRACTO_SLANG_OUTPUT}
-        COMMAND ${ABSTRACTO_SLANGC_EXECUTABLE}
-                ${ABSTRACTO_SLANG_SOURCE}
-                -target spirv
-                -profile glsl_450
-                -emit-spirv-directly
-                -o ${ABSTRACTO_SLANG_OUTPUT}
-        DEPENDS ${ABSTRACTO_SLANG_SOURCE}
-        COMMENT "Compiling Slang shader to SPIR-V: ${ABSTRACTO_SLANG_OUTPUT}"
-        VERBATIM
-      )
-        endif()
+    if(ABSTRACTO_SLANGC_EXECUTABLE)
+        add_custom_command(
+    OUTPUT ${ABSTRACTO_SLANG_OUTPUT}
+    COMMAND ${ABSTRACTO_SLANGC_EXECUTABLE}
+            ${ABSTRACTO_SLANG_SOURCE}
+            -target spirv
+            -profile glsl_450
+            -emit-spirv-directly
+            -o ${ABSTRACTO_SLANG_OUTPUT}
+    DEPENDS ${ABSTRACTO_SLANG_SOURCE}
+    COMMENT "Compiling Slang shader to SPIR-V: ${ABSTRACTO_SLANG_OUTPUT}"
+    VERBATIM
+  )
     endif()
 endforeach()
 
