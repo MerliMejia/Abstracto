@@ -54,18 +54,29 @@ private:
 
   void buildSceneOutlinerUi() {
     auto &settings = bindings.settings;
+    ensureSceneObjects(settings);
     const ModelAsset *asset = bindings.sceneModel.modelAsset();
-    const std::string assetLabel =
-        asset == nullptr
-            ? "Scene Model"
-            : std::filesystem::path(asset->path()).filename().string();
-    const bool modelSelected = settings.selectedLightIndex < 0;
     const auto &lights = settings.sceneLights.lights();
 
     ImGui::Begin("Scene Outliner");
     ImGui::SeparatorText("Objects");
-    if (ImGui::Selectable(assetLabel.c_str(), modelSelected)) {
-      settings.selectedLightIndex = -1;
+    for (int index = 0; index < static_cast<int>(settings.sceneObjects.size());
+         ++index) {
+      const SceneObject &object =
+          settings.sceneObjects[static_cast<size_t>(index)];
+      std::string label = object.name.empty()
+                              ? "Scene Object " + std::to_string(index)
+                              : object.name;
+      if (asset != nullptr && index == 0) {
+        label +=
+            "##" + std::filesystem::path(asset->path()).filename().string();
+      }
+      const bool selected = settings.selectedLightIndex < 0 &&
+                            settings.selectedObjectIndex == index;
+      if (ImGui::Selectable(label.c_str(), selected)) {
+        settings.selectedObjectIndex = index;
+        settings.selectedLightIndex = -1;
+      }
     }
     if (asset != nullptr) {
       ImGui::Text("Submeshes: %d", static_cast<int>(asset->submeshes().size()));
@@ -92,33 +103,40 @@ private:
 
   void buildObjectInspectorUi() {
     auto &settings = bindings.settings;
-    const bool modelSelected = settings.selectedLightIndex < 0;
+    ensureSceneObjects(settings);
+    const bool objectSelected = settings.selectedLightIndex < 0;
 
     ImGui::Begin("Object Inspector");
-    if (!modelSelected) {
+    if (!objectSelected) {
       ImGui::TextUnformatted(
           "A light is selected. Edit its properties in the Lights window.");
       ImGui::End();
       return;
     }
 
+    SceneObject &object =
+        settings
+            .sceneObjects[static_cast<size_t>(settings.selectedObjectIndex)];
+
     const ModelAsset *asset = bindings.sceneModel.modelAsset();
+    ImGui::Text("Object: %s",
+                object.name.empty() ? "<unnamed>" : object.name.c_str());
     if (asset != nullptr) {
       const std::string assetPath = asset->path();
-      ImGui::Text("Object: %s",
+      ImGui::Text("Asset: %s",
                   std::filesystem::path(assetPath).filename().string().c_str());
       if (!assetPath.empty()) {
         ImGui::TextWrapped("Source: %s", assetPath.c_str());
       }
     } else {
-      ImGui::TextUnformatted("Object: Scene Model");
+      ImGui::TextUnformatted("Asset: Scene Model");
     }
 
     ImGui::SeparatorText("Transform");
-    ImGui::DragFloat3("Position", &settings.modelPosition.x, 0.01f);
-    ImGui::SliderFloat3("Rotation", &settings.modelRotationDegrees.x, -180.0f,
-                        180.0f);
-    ImGui::DragFloat3("Scale", &settings.modelScale.x, 0.1f, 0.01f, 200.0f);
+    ImGui::DragFloat3("Position", &object.transform.position.x, 0.01f);
+    ImGui::SliderFloat3("Rotation", &object.transform.rotationDegrees.x,
+                        -180.0f, 180.0f);
+    ImGui::DragFloat3("Scale", &object.transform.scale.x, 0.1f, 0.01f, 200.0f);
     if (ImGui::Button("Reload Model")) {
       bindings.callbacks.reloadSceneModel();
     }
@@ -195,6 +213,7 @@ private:
 
   void buildLightsUi() {
     auto &settings = bindings.settings;
+    ensureSceneObjects(settings);
     auto &lights = settings.sceneLights.lights();
     ImGui::Begin("Lights");
     if (ImGui::Button("Add Directional")) {

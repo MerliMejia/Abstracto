@@ -22,6 +22,30 @@ inline glm::vec3 vec3FromJson(const json &value,
                    value[2].get<float>());
 }
 
+inline json sceneObjectToJson(const SceneObject &object) {
+  return {
+      {"name", object.name},
+      {"visible", object.visible},
+      {"position", vec3ToJson(object.transform.position)},
+      {"rotationDegrees", vec3ToJson(object.transform.rotationDegrees)},
+      {"scale", vec3ToJson(object.transform.scale)},
+  };
+}
+
+inline SceneObject sceneObjectFromJson(const json &value) {
+  SceneObject object;
+  object.name = value.value("name", object.name);
+  object.visible = value.value("visible", object.visible);
+  object.transform.position = vec3FromJson(
+      value.value("position", json::array()), object.transform.position);
+  object.transform.rotationDegrees =
+      vec3FromJson(value.value("rotationDegrees", json::array()),
+                   object.transform.rotationDegrees);
+  object.transform.scale =
+      vec3FromJson(value.value("scale", json::array()), object.transform.scale);
+  return object;
+}
+
 inline json sceneLightToJson(const SceneLight &light) {
   return {
       {"name", light.name},
@@ -154,6 +178,11 @@ iblBakeSettingsFromJson(const json &value) {
 }
 
 inline json settingsToJson(const DefaultDebugUISettings &settings) {
+  json sceneObjects = json::array();
+  for (const auto &object : settings.sceneObjects) {
+    sceneObjects.push_back(sceneObjectToJson(object));
+  }
+
   json sceneLights = json::array();
   for (const auto &light : settings.sceneLights.lights()) {
     sceneLights.push_back(sceneLightToJson(light));
@@ -163,7 +192,9 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"presentedOutput", static_cast<uint32_t>(settings.presentedOutput)},
       {"pbrDebugView", static_cast<uint32_t>(settings.pbrDebugView)},
       {"selectedMaterialIndex", settings.selectedMaterialIndex},
+      {"selectedObjectIndex", settings.selectedObjectIndex},
       {"selectedLightIndex", settings.selectedLightIndex},
+      {"sceneObjects", sceneObjects},
       {"sceneLights", sceneLights},
       {"lightMarkersVisible", settings.lightMarkersVisible},
       {"lightMarkerScale", settings.lightMarkerScale},
@@ -187,9 +218,19 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"skyboxVisible", settings.skyboxVisible},
       {"syncSkySunToLight", settings.syncSkySunToLight},
       {"iblBakeSettings", iblBakeSettingsToJson(settings.iblBakeSettings)},
-      {"modelPosition", vec3ToJson(settings.modelPosition)},
-      {"modelRotationDegrees", vec3ToJson(settings.modelRotationDegrees)},
-      {"modelScale", vec3ToJson(settings.modelScale)},
+      {"modelPosition",
+       vec3ToJson(settings.sceneObjects.empty()
+                      ? glm::vec3(0.0f)
+                      : settings.sceneObjects.front().transform.position)},
+      {"modelRotationDegrees",
+       vec3ToJson(
+           settings.sceneObjects.empty()
+               ? glm::vec3(0.0f)
+               : settings.sceneObjects.front().transform.rotationDegrees)},
+      {"modelScale",
+       vec3ToJson(settings.sceneObjects.empty()
+                      ? glm::vec3(1.0f)
+                      : settings.sceneObjects.front().transform.scale)},
       {"cameraPosition", vec3ToJson(settings.cameraPosition)},
       {"cameraYawRadians", settings.cameraYawRadians},
       {"cameraPitchRadians", settings.cameraPitchRadians},
@@ -207,8 +248,30 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       "pbrDebugView", static_cast<uint32_t>(settings.pbrDebugView)));
   settings.selectedMaterialIndex =
       value.value("selectedMaterialIndex", settings.selectedMaterialIndex);
+  settings.selectedObjectIndex =
+      value.value("selectedObjectIndex", settings.selectedObjectIndex);
   settings.selectedLightIndex =
       value.value("selectedLightIndex", settings.selectedLightIndex);
+
+  settings.sceneObjects.clear();
+  if (value.contains("sceneObjects") && value["sceneObjects"].is_array()) {
+    for (const auto &objectValue : value["sceneObjects"]) {
+      settings.sceneObjects.push_back(sceneObjectFromJson(objectValue));
+    }
+  }
+  if (settings.sceneObjects.empty()) {
+    SceneObject legacyObject;
+    legacyObject.transform.position =
+        vec3FromJson(value.value("modelPosition", json::array()),
+                     legacyObject.transform.position);
+    legacyObject.transform.rotationDegrees =
+        vec3FromJson(value.value("modelRotationDegrees", json::array()),
+                     legacyObject.transform.rotationDegrees);
+    legacyObject.transform.scale = vec3FromJson(
+        value.value("modelScale", json::array()), legacyObject.transform.scale);
+    settings.sceneObjects.push_back(std::move(legacyObject));
+  }
+  ensureSceneObjects(settings);
 
   settings.sceneLights.clear();
   if (value.contains("sceneLights") && value["sceneLights"].is_array()) {
@@ -267,14 +330,6 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
     settings.iblBakeSettings =
         iblBakeSettingsFromJson(value["iblBakeSettings"]);
   }
-
-  settings.modelPosition = vec3FromJson(
-      value.value("modelPosition", json::array()), settings.modelPosition);
-  settings.modelRotationDegrees =
-      vec3FromJson(value.value("modelRotationDegrees", json::array()),
-                   settings.modelRotationDegrees);
-  settings.modelScale = vec3FromJson(value.value("modelScale", json::array()),
-                                     settings.modelScale);
   settings.cameraPosition = vec3FromJson(
       value.value("cameraPosition", json::array()), settings.cameraPosition);
   settings.cameraYawRadians =

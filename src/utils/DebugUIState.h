@@ -5,9 +5,12 @@
 #include "../renderable/ImageBasedLightingTypes.h"
 #include "../renderable/RenderableModel.h"
 #include "../renderable/SceneLightSet.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -28,11 +31,26 @@ enum class PresentedOutput : uint32_t {
   SpotShadow2 = 11,
 };
 
+struct SceneTransform {
+  glm::vec3 position = {0.0f, 0.0f, 0.0f};
+  glm::vec3 rotationDegrees = {0.0f, 0.0f, 0.0f};
+  glm::vec3 scale = {1.0f, 1.0f, 1.0f};
+};
+
+struct SceneObject {
+  std::string name = "Scene Model";
+  SceneTransform transform{};
+  bool visible = true;
+};
+
 struct DefaultDebugUISettings {
   PresentedOutput presentedOutput = PresentedOutput::PbrPass;
   PbrDebugView pbrDebugView = PbrDebugView::Final;
   int selectedMaterialIndex = 0;
-  int selectedLightIndex = 0;
+  int selectedObjectIndex = 0;
+  int selectedLightIndex = -1;
+
+  std::vector<SceneObject> sceneObjects{SceneObject{}};
 
   SceneLightSet sceneLights = SceneLightSet::showcaseLights();
   bool lightMarkersVisible = true;
@@ -59,10 +77,6 @@ struct DefaultDebugUISettings {
   bool skyboxVisible = false;
   bool syncSkySunToLight = true;
   ImageBasedLightingBakeSettings iblBakeSettings{};
-
-  glm::vec3 modelPosition = {0.0f, 0.0f, 0.0f};
-  glm::vec3 modelRotationDegrees = {0.0f, 0.0f, 0.0f};
-  glm::vec3 modelScale = {1.0f, 1.0f, 1.0f};
 
   glm::vec3 cameraPosition = {0.0f, 1.4f, 4.5f};
   float cameraYawRadians = glm::radians(180.0f);
@@ -196,3 +210,12 @@ struct DefaultDebugUIBindings {
   DefaultDebugUICallbacks callbacks;
   DefaultDebugUIPerformanceStats performanceStats;
 };
+
+inline void ensureSceneObjects(DefaultDebugUISettings &settings) {
+  if (settings.sceneObjects.empty()) {
+    settings.sceneObjects.push_back(SceneObject{});
+  }
+  settings.selectedObjectIndex =
+      std::clamp(settings.selectedObjectIndex, 0,
+                 static_cast<int>(settings.sceneObjects.size()) - 1);
+}

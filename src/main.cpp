@@ -60,7 +60,8 @@ private:
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
   vk::raii::DescriptorSetLayout &sceneDescriptorSetLayout() {
-    if (geometryPass == nullptr || geometryPass->descriptorSetLayout() == nullptr) {
+    if (geometryPass == nullptr ||
+        geometryPass->descriptorSetLayout() == nullptr) {
       throw std::runtime_error(
           "GeometryPass descriptor set layout is not available");
     }
@@ -114,6 +115,18 @@ private:
     }
   }
 
+  SceneObject &primarySceneObject() {
+    ensureSceneObjects(debugUiSettings);
+    return debugUiSettings.sceneObjects.front();
+  }
+
+  const SceneObject &primarySceneObject() const {
+    if (debugUiSettings.sceneObjects.empty()) {
+      throw std::runtime_error("Default scene object is not available");
+    }
+    return debugUiSettings.sceneObjects.front();
+  }
+
   void rebuildSceneRenderItems() {
     renderItems = sceneModel.buildRenderItems(geometryPass);
     if (directionalShadowPass != nullptr) {
@@ -143,9 +156,8 @@ private:
   void reloadSceneModel() {
     backend.waitIdle();
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            sceneDescriptorSetLayout(),
-                            frameGeometryUniforms, sampler,
-                            MAX_FRAMES_IN_FLIGHT);
+                            sceneDescriptorSetLayout(), frameGeometryUniforms,
+                            sampler, MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
   }
 
@@ -288,7 +300,8 @@ private:
     debugOverlayPass->setDirectionalMarkerMesh(directionalLightMarkerMesh);
     debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
     debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-    debugOverlayPass->setDirectionalAnchor(debugUiSettings.modelPosition);
+    debugOverlayPass->setDirectionalAnchor(
+        primarySceneObject().transform.position);
     renderer.addPass(std::move(debugOverlayPassLocal));
 
     auto imguiPassLocal = std::make_unique<ImGuiPass>(
@@ -300,9 +313,8 @@ private:
 
     frameGeometryUniforms.create(deviceContext(), MAX_FRAMES_IN_FLIGHT);
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            sceneDescriptorSetLayout(),
-                            frameGeometryUniforms, sampler,
-                            MAX_FRAMES_IN_FLIGHT);
+                            sceneDescriptorSetLayout(), frameGeometryUniforms,
+                            sampler, MAX_FRAMES_IN_FLIGHT);
     rebuildSceneRenderItems();
   }
 
@@ -344,7 +356,7 @@ private:
         std::max(debugUiSettings.directionalShadowNearPlane, 0.01f);
     const float farPlane =
         std::max(debugUiSettings.directionalShadowFarPlane, nearPlane + 0.5f);
-    const glm::vec3 target = debugUiSettings.modelPosition;
+    const glm::vec3 target = primarySceneObject().transform.position;
     const glm::vec3 eye = target - direction * (farPlane * 0.5f);
     const glm::mat4 view = glm::lookAt(eye, target, shadowUpVector(direction));
     glm::mat4 proj = glm::ortho(-shadowExtent, shadowExtent, -shadowExtent,
@@ -510,24 +522,25 @@ private:
     cameraController.update(deltaSeconds, window.handle());
 
     GeometryUniformData geometryUniformData{};
+    const SceneObject &sceneObject = primarySceneObject();
 
     geometryUniformData.model = glm::mat4(1.0f);
     geometryUniformData.model = glm::translate(geometryUniformData.model,
-                                               debugUiSettings.modelPosition);
+                                               sceneObject.transform.position);
     geometryUniformData.model =
         glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.x),
+                    glm::radians(sceneObject.transform.rotationDegrees.x),
                     glm::vec3(1.0f, 0.0f, 0.0f));
     geometryUniformData.model =
         glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.y),
+                    glm::radians(sceneObject.transform.rotationDegrees.y),
                     glm::vec3(0.0f, 1.0f, 0.0f));
     geometryUniformData.model =
         glm::rotate(geometryUniformData.model,
-                    glm::radians(debugUiSettings.modelRotationDegrees.z),
+                    glm::radians(sceneObject.transform.rotationDegrees.z),
                     glm::vec3(0.0f, 0.0f, 1.0f));
     geometryUniformData.model =
-        glm::scale(geometryUniformData.model, debugUiSettings.modelScale);
+        glm::scale(geometryUniformData.model, sceneObject.transform.scale);
     geometryUniformData.modelNormal =
         glm::transpose(glm::inverse(geometryUniformData.model));
 
@@ -572,7 +585,7 @@ private:
       debugOverlayPass->setSceneLights(debugUiSettings.sceneLights);
       debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
       debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-      debugOverlayPass->setDirectionalAnchor(debugUiSettings.modelPosition);
+      debugOverlayPass->setDirectionalAnchor(sceneObject.transform.position);
     }
     if (tonemapPass != nullptr) {
       const glm::vec3 lightRadiance = estimatedSceneLightRadiance();
