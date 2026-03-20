@@ -201,6 +201,14 @@ struct DefaultDebugUIResult {
 struct DefaultDebugUIPerformanceStats {
   float fps = 0.0f;
   float frameTimeMs = 0.0f;
+  uint32_t objectCount = 0;
+  uint32_t lightCount = 0;
+  uint32_t materialCount = 0;
+  uint32_t vertexCount = 0;
+  uint32_t triangleCount = 0;
+  uint32_t drawCallCount = 0;
+  uint32_t sceneDrawCallCount = 0;
+  uint32_t shadowDrawCallCount = 0;
 };
 
 struct DefaultDebugUIBindings {
@@ -208,6 +216,7 @@ struct DefaultDebugUIBindings {
   DefaultDebugUISettings &settings;
   DefaultDebugUICallbacks callbacks;
   DefaultDebugUIPerformanceStats performanceStats;
+  ImGuiID dockspaceId = 0;
 };
 
 inline void ensureSceneObjects(DefaultDebugUISettings &settings) {

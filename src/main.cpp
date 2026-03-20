@@ -217,6 +217,45 @@ private:
     debugUiSettings.selectedLightIndex = -1;
   }
 
+  DefaultDebugUIPerformanceStats
+  currentPerformanceStats(float fps, float frameTimeMs) const {
+    DefaultDebugUIPerformanceStats stats{
+        .fps = fps,
+        .frameTimeMs = frameTimeMs,
+        .objectCount = static_cast<uint32_t>(debugUiSettings.sceneObjects.size()),
+        .lightCount =
+            static_cast<uint32_t>(debugUiSettings.sceneLights.size()),
+    };
+
+    const ModelAsset *asset = sceneModel.modelAsset();
+    if (asset != nullptr) {
+      stats.materialCount = static_cast<uint32_t>(sceneModel.materials().size());
+      stats.vertexCount = static_cast<uint32_t>(asset->mesh().vertexCount());
+      stats.triangleCount =
+          static_cast<uint32_t>(asset->mesh().getIndices().size() / 3);
+    }
+
+    stats.drawCallCount = static_cast<uint32_t>(renderItems.size());
+    for (const auto &renderItem : renderItems) {
+      if (renderItem.targetPass == geometryPass) {
+        ++stats.sceneDrawCallCount;
+        continue;
+      }
+      if (renderItem.targetPass == directionalShadowPass) {
+        ++stats.shadowDrawCallCount;
+        continue;
+      }
+      for (const ShadowPass *spotShadowPass : spotShadowPasses) {
+        if (renderItem.targetPass == spotShadowPass) {
+          ++stats.shadowDrawCallCount;
+          break;
+        }
+      }
+    }
+
+    return stats;
+  }
+
   void rebuildSceneRenderItems() {
     const std::vector<glm::mat4> objectMatrices = sceneObjectMatrices();
     renderItems = sceneModel.buildRenderItems(geometryPass, objectMatrices);
@@ -573,8 +612,8 @@ private:
               .currentPrimaryDirectionalLightWorld =
                   [this]() { return currentPrimaryDirectionalLightWorld(); },
           },
-          DefaultDebugUIPerformanceStats{.fps = smoothedFps,
-                                         .frameTimeMs = smoothedFrameTimeMs});
+          currentPerformanceStats(smoothedFps, smoothedFrameTimeMs),
+          imguiPass->dockspaceId());
       const DefaultDebugUIResult uiResult = defaultDebugUi.build();
       if (uiResult.materialChanged) {
         sceneModel.syncMaterialParameters();

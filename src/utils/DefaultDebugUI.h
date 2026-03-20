@@ -5,6 +5,8 @@
 #include "SceneEditorUI.h"
 #include <utility>
 
+#include <imgui_internal.h>
+
 class DefaultDebugUI {
 public:
   explicit DefaultDebugUI(DefaultDebugUIBindings bindings)
@@ -13,35 +15,84 @@ public:
   static DefaultDebugUI
   create(RenderableModel &sceneModel, DefaultDebugUISettings &settings,
          DefaultDebugUICallbacks callbacks,
-         DefaultDebugUIPerformanceStats performanceStats = {}) {
+         DefaultDebugUIPerformanceStats performanceStats = {},
+         ImGuiID dockspaceId = 0) {
     return DefaultDebugUI(DefaultDebugUIBindings{
         .sceneModel = sceneModel,
         .settings = settings,
         .callbacks = std::move(callbacks),
         .performanceStats = performanceStats,
+        .dockspaceId = dockspaceId,
     });
   }
 
   DefaultDebugUIResult build() {
+    applyDefaultDockLayout();
+
     DefaultDebugUIResult result;
     SceneEditorUI sceneEditorUi(bindings);
     RenderSettingsUI renderSettingsUi(bindings);
     result.materialChanged = sceneEditorUi.build();
-    buildPerformanceUi();
-    buildSessionUi(result);
-    buildCameraUi();
-    result.iblBakeRequested = renderSettingsUi.build();
+    result.iblBakeRequested = renderSettingsUi.buildWorldPanel();
+    buildToolsPanel(result);
     return result;
   }
 
 private:
   DefaultDebugUIBindings bindings;
 
+  void applyDefaultDockLayout() {
+    static ImGuiID lastDockspaceId = 0;
+    if (bindings.dockspaceId == 0 || bindings.dockspaceId == lastDockspaceId) {
+      return;
+    }
+
+    ImGui::DockBuilderRemoveNode(bindings.dockspaceId);
+    ImGui::DockBuilderAddNode(bindings.dockspaceId,
+                              ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(bindings.dockspaceId,
+                                  ImGui::GetMainViewport()->WorkSize);
+
+    ImGuiID dockMain = bindings.dockspaceId;
+    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Down,
+                                                     0.24f, nullptr, &dockMain);
+    ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Left,
+                                                   0.20f, nullptr, &dockMain);
+    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right,
+                                                    0.28f, nullptr, &dockMain);
+
+    ImGui::DockBuilderDockWindow("Hierarchy", dockLeft);
+    ImGui::DockBuilderDockWindow("Inspector", dockRight);
+    ImGui::DockBuilderDockWindow("World", dockRight);
+    ImGui::DockBuilderDockWindow("Tools", dockBottom);
+    ImGui::DockBuilderFinish(bindings.dockspaceId);
+    lastDockspaceId = bindings.dockspaceId;
+  }
+
+  void buildToolsPanel(DefaultDebugUIResult &result) {
+    ImGui::Begin("Tools");
+    if (ImGui::BeginTabBar("ToolsTabs")) {
+      if (ImGui::BeginTabItem("Performance")) {
+        buildPerformanceUi();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Camera")) {
+        buildCameraUi();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Session")) {
+        buildSessionUi(result);
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
+    }
+    ImGui::End();
+  }
+
   void buildCameraUi() {
     auto &settings = bindings.settings;
     DefaultDebugCameraController cameraController =
         DefaultDebugCameraController::create(settings);
-    ImGui::Begin("Camera");
     ImGui::TextUnformatted("Move: WASD + Q/E");
     ImGui::TextUnformatted("Look: Hold RMB and drag");
     ImGui::SliderFloat("Move Speed", &settings.cameraMoveSpeed, 0.5f, 10.0f);
@@ -54,20 +105,50 @@ private:
     }
     ImGui::Text("Position: %.2f %.2f %.2f", settings.cameraPosition.x,
                 settings.cameraPosition.y, settings.cameraPosition.z);
-    ImGui::End();
   }
 
   void buildPerformanceUi() {
     const auto &performanceStats = bindings.performanceStats;
-    ImGui::Begin("Performance");
-    ImGui::Text("FPS: %.1f", performanceStats.fps);
-    ImGui::SameLine(0.0f, 16.0f);
-    ImGui::Text("Frame Time: %.2f ms", performanceStats.frameTimeMs);
-    ImGui::End();
+    if (ImGui::BeginTable("PerformanceStats", 4,
+                          ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("FPS: %.1f", performanceStats.fps);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Frame Time: %.2f ms", performanceStats.frameTimeMs);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Objects: %u", performanceStats.objectCount);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Lights: %u", performanceStats.lightCount);
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Materials: %u", performanceStats.materialCount);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Vertices: %u", performanceStats.vertexCount);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Triangles: %u", performanceStats.triangleCount);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Draw Calls: %u", performanceStats.drawCallCount);
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Scene Draws: %u", performanceStats.sceneDrawCallCount);
+
+      ImGui::TableNextColumn();
+      ImGui::Text("Shadow Draws: %u", performanceStats.shadowDrawCallCount);
+
+      ImGui::EndTable();
+    }
   }
 
   void buildSessionUi(DefaultDebugUIResult &result) {
-    ImGui::Begin("Session");
     if (ImGui::Button("Save Current")) {
       result.saveSessionRequested = true;
     }
@@ -79,6 +160,5 @@ private:
     if (ImGui::Button("Reset To Defaults")) {
       result.resetSessionRequested = true;
     }
-    ImGui::End();
   }
 };

@@ -9,12 +9,25 @@ public:
   explicit RenderSettingsUI(DefaultDebugUIBindings bindings)
       : bindings(std::move(bindings)) {}
 
-  bool build() {
-    buildLightingDebugUi();
-    buildTonemapUi();
-    buildViewUi();
-    buildPbrDebugUi();
-    return buildEnvironmentUi();
+  bool buildWorldPanel() {
+    bool rebuildRequested = false;
+    ImGui::Begin("World");
+    if (ImGui::BeginTabBar("WorldTabs")) {
+      if (ImGui::BeginTabItem("Rendering")) {
+        buildLightingDebugUi();
+        buildTonemapUi();
+        buildPbrDebugUi();
+        buildViewUi();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Environment")) {
+        rebuildRequested = buildEnvironmentUi();
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
+    }
+    ImGui::End();
+    return rebuildRequested;
   }
 
 private:
@@ -22,7 +35,7 @@ private:
 
   void buildLightingDebugUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("Lighting & Shadows");
+    ImGui::SeparatorText("Lighting & Shadows");
     ImGui::Checkbox("Enable Shadows", &settings.shadowsEnabled);
     ImGui::SliderFloat("Directional Shadow Extent",
                        &settings.directionalShadowExtent, 1.0f, 40.0f, "%.2f");
@@ -39,12 +52,11 @@ private:
     ImGui::SeparatorText("Debug Overlay");
     ImGui::Checkbox("Show Light Markers", &settings.lightMarkersVisible);
     ImGui::SliderFloat("Marker Scale", &settings.lightMarkerScale, 0.05f, 2.5f);
-    ImGui::End();
   }
 
   void buildTonemapUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("Tonemap");
+    ImGui::SeparatorText("Tonemap");
     int tonemapOperatorIndex = static_cast<int>(settings.tonemapOperator);
     ImGui::Combo("Operator", &tonemapOperatorIndex,
                  "None\0Reinhard\0ACES\0Filmic\0");
@@ -59,14 +71,13 @@ private:
     }
     ImGui::SliderFloat("White Point", &settings.whitePoint, 0.5f, 16.0f);
     ImGui::SliderFloat("Gamma", &settings.gamma, 1.0f, 3.0f);
-    ImGui::End();
   }
 
   void buildViewUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("Render View");
+    ImGui::SeparatorText("Render View");
     int output = static_cast<int>(settings.presentedOutput);
-    ImGui::SeparatorText("GBuffers (Geometry Pass)");
+    ImGui::TextUnformatted("GBuffers");
     ImGui::RadioButton("Albedo", &output,
                        static_cast<int>(PresentedOutput::GBufferAlbedo));
     ImGui::RadioButton("Normal", &output,
@@ -78,7 +89,8 @@ private:
     ImGui::RadioButton("Depth", &output,
                        static_cast<int>(PresentedOutput::GBufferDepth));
 
-    ImGui::SeparatorText("Pass Outputs");
+    ImGui::Separator();
+    ImGui::TextUnformatted("Pass Outputs");
     ImGui::RadioButton("Geometry Pass", &output,
                        static_cast<int>(PresentedOutput::GeometryPass));
     ImGui::RadioButton("PBR Pass", &output,
@@ -86,7 +98,8 @@ private:
     ImGui::RadioButton("Tone Mapping Pass", &output,
                        static_cast<int>(PresentedOutput::TonemapPass));
 
-    ImGui::SeparatorText("Shadow Maps");
+    ImGui::Separator();
+    ImGui::TextUnformatted("Shadow Maps");
     ImGui::RadioButton("Directional Shadow", &output,
                        static_cast<int>(PresentedOutput::DirectionalShadow));
     ImGui::RadioButton("Spot Shadow 1", &output,
@@ -97,12 +110,11 @@ private:
                        static_cast<int>(PresentedOutput::SpotShadow2));
 
     settings.presentedOutput = static_cast<PresentedOutput>(output);
-    ImGui::End();
   }
 
   void buildPbrDebugUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("PBR Debug");
+    ImGui::SeparatorText("PBR Debug");
     int pbrDebugMode = static_cast<int>(settings.pbrDebugView);
     ImGui::RadioButton("Final", &pbrDebugMode,
                        static_cast<int>(PbrDebugView::Final));
@@ -119,12 +131,11 @@ private:
     ImGui::RadioButton("Background", &pbrDebugMode,
                        static_cast<int>(PbrDebugView::Background));
     settings.pbrDebugView = static_cast<PbrDebugView>(pbrDebugMode);
-    ImGui::End();
   }
 
   bool buildEnvironmentUi() {
     auto &settings = bindings.settings;
-    ImGui::Begin("Environment");
+    ImGui::SeparatorText("Environment");
     ImGui::Checkbox("Enable IBL", &settings.iblEnabled);
     ImGui::Checkbox("Show Skybox", &settings.skyboxVisible);
     ImGui::SliderFloat("Env Intensity", &settings.environmentIntensity, 0.0f,
@@ -139,9 +150,8 @@ private:
                        0.5f, 3.0f);
     ImGui::SliderAngle("Env Rotation", &settings.environmentRotationRadians,
                        -180.0f, 180.0f);
-    ImGui::End();
 
-    ImGui::Begin("Procedural Sky");
+    ImGui::SeparatorText("Procedural Sky");
     ImGui::TextUnformatted("Changes here do not rebuild automatically.");
     ImGui::TextUnformatted("Use the button below to regenerate the IBL.");
     ImGui::Separator();
@@ -195,8 +205,6 @@ private:
                          &settings.iblBakeSettings.sky.horizonGlow, 0.0f, 1.0f);
     }
 
-    const bool rebuildRequested = ImGui::Button("Rebuild IBL");
-    ImGui::End();
-    return rebuildRequested;
+    return ImGui::Button("Rebuild IBL");
   }
 };

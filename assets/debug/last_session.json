@@ -72,13 +72,13 @@
   ],
   "modelRotationDegrees": [
     0.0,
-    0.0,
+    -0.0,
     0.0
   ],
   "modelScale": [
-    1.0,
-    1.0,
-    1.0
+    13.494441032409668,
+    13.494441032409668,
+    13.494441032409668
   ],
   "pbrDebugView": 0,
   "presentedOutput": 7,
@@ -171,8 +171,144 @@
       "type": 2
     }
   ],
-  "selectedLightIndex": 1,
+  "sceneObjects": [
+    {
+      "name": "Env_prim_0",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "scale": [
+        13.494441032409668,
+        13.494441032409668,
+        13.494441032409668
+      ],
+      "visible": true
+    },
+    {
+      "name": "Env_prim_1",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "scale": [
+        13.494441032409668,
+        13.494441032409668,
+        13.494441032409668
+      ],
+      "visible": true
+    },
+    {
+      "name": "Env_prim_2",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "scale": [
+        13.494441032409668,
+        13.494441032409668,
+        13.494441032409668
+      ],
+      "visible": true
+    },
+    {
+      "name": "bed_prim_0",
+      "position": [
+        6.778603553771973,
+        0.0,
+        -3.234642267227173
+      ],
+      "rotationDegrees": [
+        0.0,
+        -20.761138916015625,
+        0.0
+      ],
+      "scale": [
+        5.907809734344482,
+        5.907808780670166,
+        5.907809734344482
+      ],
+      "visible": true
+    },
+    {
+      "name": "sofa_03_prim_0",
+      "position": [
+        -7.312048435211182,
+        -0.06385385990142822,
+        -5.1242547035217285
+      ],
+      "rotationDegrees": [
+        0.0,
+        62.77573013305664,
+        0.0
+      ],
+      "scale": [
+        4.735774993896484,
+        4.735774993896484,
+        4.735774993896484
+      ],
+      "visible": true
+    },
+    {
+      "name": "sofa_03_prim_1",
+      "position": [
+        -7.312048435211182,
+        -0.06385385990142822,
+        -5.1242547035217285
+      ],
+      "rotationDegrees": [
+        0.0,
+        62.77573013305664,
+        0.0
+      ],
+      "scale": [
+        4.735774993896484,
+        4.735774993896484,
+        4.735774993896484
+      ],
+      "visible": true
+    },
+    {
+      "name": "ceiling_fan_prim_0",
+      "position": [
+        0.0,
+        13.560799598693848,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "scale": [
+        6.777972221374512,
+        6.777972221374512,
+        6.777972221374512
+      ],
+      "visible": true
+    }
+  ],
+  "selectedLightIndex": -1,
   "selectedMaterialIndex": 5,
+  "selectedObjectIndex": 0,
   "shadowsEnabled": true,
   "skyboxVisible": true,
   "syncSkySunToLight": true,
