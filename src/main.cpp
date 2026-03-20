@@ -1,19 +1,16 @@
+#include "app/AppPerformanceStats.h"
+#include "app/AppRendererSetup.h"
+#include "app/AppSceneController.h"
+#include "app/ShadowSystem.h"
 #include "backend/AppWindow.h"
 #include "backend/BackendConfig.h"
 #include "backend/VulkanBackend.h"
-#include "passes/DebugOverlayPass.h"
-#include "passes/DebugPresentPass.h"
-#include "passes/GeometryPass.h"
-#include "passes/ImGuiPass.h"
-#include "passes/PbrPass.h"
 #include "passes/ShadowPass.h"
-#include "passes/TonemapPass.h"
 #include "renderable/DebugLightMeshes.h"
 #include "renderable/FrameGeometryUniforms.h"
 #include "renderable/RenderableModel.h"
 #include "renderable/Sampler.h"
 #include "renderer/PassRenderer.h"
-#include "renderer/PipelineSpec.h"
 #include "renderer/RenderPass.h"
 #include "utils/DebugSessionIO.h"
 #include "utils/DefaultDebugUI.h"
@@ -26,9 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <iostream>
-#include <memory>
 
 constexpr uint32_t WIDTH = 1280;
 constexpr uint32_t HEIGHT = 720;
@@ -116,213 +111,15 @@ private:
     }
   }
 
-  static glm::mat4 sceneTransformMatrix(const SceneTransform &transform) {
-    glm::mat4 matrix(1.0f);
-    matrix = glm::translate(matrix, transform.position);
-    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.x),
-                         glm::vec3(1.0f, 0.0f, 0.0f));
-    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.y),
-                         glm::vec3(0.0f, 1.0f, 0.0f));
-    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.z),
-                         glm::vec3(0.0f, 0.0f, 1.0f));
-    return glm::scale(matrix, transform.scale);
-  }
-
-  static SceneTransform sceneTransformFromMatrix(const glm::mat4 &matrix) {
-    SceneTransform transform;
-    transform.position = glm::vec3(matrix[3]);
-
-    glm::mat3 rotationMatrix(matrix);
-    transform.scale.x = glm::length(rotationMatrix[0]);
-    transform.scale.y = glm::length(rotationMatrix[1]);
-    transform.scale.z = glm::length(rotationMatrix[2]);
-
-    if (transform.scale.x > 1e-6f) {
-      rotationMatrix[0] /= transform.scale.x;
-    }
-    if (transform.scale.y > 1e-6f) {
-      rotationMatrix[1] /= transform.scale.y;
-    }
-    if (transform.scale.z > 1e-6f) {
-      rotationMatrix[2] /= transform.scale.z;
-    }
-
-    transform.rotationDegrees =
-        glm::degrees(glm::eulerAngles(glm::quat_cast(rotationMatrix)));
-    return transform;
-  }
-
-  glm::vec3 sceneObjectsAnchor() const {
-    if (debugUiSettings.sceneObjects.empty()) {
-      return glm::vec3(0.0f);
-    }
-
-    glm::vec3 anchor(0.0f);
-    for (const auto &object : debugUiSettings.sceneObjects) {
-      anchor += object.transform.position;
-    }
-    return anchor / static_cast<float>(debugUiSettings.sceneObjects.size());
-  }
-
-  std::vector<glm::mat4> sceneObjectMatrices() const {
-    std::vector<glm::mat4> matrices;
-    matrices.reserve(debugUiSettings.sceneObjects.size());
-    for (const auto &object : debugUiSettings.sceneObjects) {
-      matrices.push_back(sceneTransformMatrix(object.transform));
-    }
-    return matrices;
-  }
-
   void syncSceneObjectsWithModel() {
-    const ModelAsset *asset = sceneModel.modelAsset();
-    if (asset == nullptr) {
-      ensureSceneObjects(debugUiSettings);
-      return;
-    }
-
-    const auto &submeshes = asset->submeshes();
-    if (submeshes.empty()) {
-      ensureSceneObjects(debugUiSettings);
-      return;
-    }
-
-    if (debugUiSettings.sceneObjects.size() == submeshes.size()) {
-      for (size_t index = 0; index < submeshes.size(); ++index) {
-        if (debugUiSettings.sceneObjects[index].name.empty()) {
-          debugUiSettings.sceneObjects[index].name = submeshes[index].name;
-        }
-      }
-      ensureSceneObjects(debugUiSettings);
-      return;
-    }
-
-    const glm::mat4 legacyRootMatrix =
-        debugUiSettings.sceneObjects.size() == 1
-            ? sceneTransformMatrix(
-                  debugUiSettings.sceneObjects.front().transform)
-            : glm::mat4(1.0f);
-
-    std::vector<SceneObject> sceneObjects;
-    sceneObjects.reserve(submeshes.size());
-    for (const auto &submesh : submeshes) {
-      sceneObjects.push_back(SceneObject{
-          .name = submesh.name.empty() ? "Scene Object" : submesh.name,
-          .transform =
-              sceneTransformFromMatrix(legacyRootMatrix * submesh.transform),
-      });
-    }
-
-    debugUiSettings.sceneObjects = std::move(sceneObjects);
-    ensureSceneObjects(debugUiSettings);
-    debugUiSettings.selectedLightIndex = -1;
-  }
-
-  uint32_t activeShadowPassCount() const {
-    if (!debugUiSettings.shadowsEnabled) {
-      return 0;
-    }
-
-    bool directionalAssigned = false;
-    uint32_t spotShadowSlot = 0;
-    const auto &lights = debugUiSettings.sceneLights.lights();
-    for (size_t sceneLightIndex = 0; sceneLightIndex < lights.size();
-         ++sceneLightIndex) {
-      const auto &light = lights[sceneLightIndex];
-      if (!light.enabled || !light.castsShadow) {
-        continue;
-      }
-
-      if (light.type == SceneLightType::Directional && !directionalAssigned &&
-          directionalShadowPass != nullptr) {
-        directionalAssigned = true;
-        continue;
-      }
-
-      if (light.type == SceneLightType::Spot &&
-          spotShadowSlot < MAX_SPOT_SHADOW_PASSES &&
-          spotShadowPasses[spotShadowSlot] != nullptr) {
-        ++spotShadowSlot;
-      }
-    }
-
-    return (directionalAssigned ? 1u : 0u) + spotShadowSlot;
-  }
-
-  DefaultDebugUIPerformanceStats
-  currentPerformanceStats(float fps, float frameTimeMs) const {
-    DefaultDebugUIPerformanceStats stats{
-        .fps = fps,
-        .frameTimeMs = frameTimeMs,
-        .objectCount = static_cast<uint32_t>(debugUiSettings.sceneObjects.size()),
-        .lightCount =
-            static_cast<uint32_t>(debugUiSettings.sceneLights.size()),
-    };
-
-    const ModelAsset *asset = sceneModel.modelAsset();
-    if (asset != nullptr) {
-      stats.materialCount = static_cast<uint32_t>(sceneModel.materials().size());
-      stats.vertexCount = static_cast<uint32_t>(asset->mesh().vertexCount());
-      stats.triangleCount =
-          static_cast<uint32_t>(asset->mesh().getIndices().size() / 3);
-    }
-
-    uint32_t postProcessDrawCallCount = 0;
-    for (const auto &renderItem : renderItems) {
-      if (renderItem.targetPass == geometryPass) {
-        ++stats.sceneDrawCallCount;
-        continue;
-      }
-      if (renderItem.targetPass == directionalShadowPass) {
-        ++stats.shadowDrawCallCount;
-        continue;
-      }
-      for (const ShadowPass *spotShadowPass : spotShadowPasses) {
-        if (renderItem.targetPass == spotShadowPass) {
-          break;
-        }
-      }
-      if (renderItem.targetPass == pbrPass || renderItem.targetPass == tonemapPass ||
-          renderItem.targetPass == debugPresentPass) {
-        ++postProcessDrawCallCount;
-      }
-    }
-
-    stats.preparedDrawCallCount = static_cast<uint32_t>(renderItems.size());
-    stats.shadowDrawCallCount =
-        stats.sceneDrawCallCount * activeShadowPassCount();
-    stats.drawCallCount = stats.sceneDrawCallCount +
-                          stats.shadowDrawCallCount + postProcessDrawCallCount;
-
-    return stats;
+    AppSceneController::syncSceneObjectsWithModel(debugUiSettings, sceneModel);
   }
 
   void rebuildSceneRenderItems() {
-    const std::vector<glm::mat4> objectMatrices = sceneObjectMatrices();
-    renderItems = sceneModel.buildRenderItems(geometryPass, objectMatrices);
-    if (directionalShadowPass != nullptr) {
-      auto shadowItems =
-          sceneModel.buildRenderItems(directionalShadowPass, objectMatrices);
-      renderItems.insert(renderItems.end(), shadowItems.begin(),
-                         shadowItems.end());
-    }
-    for (ShadowPass *spotShadowPass : spotShadowPasses) {
-      if (spotShadowPass == nullptr) {
-        continue;
-      }
-      auto shadowItems =
-          sceneModel.buildRenderItems(spotShadowPass, objectMatrices);
-      renderItems.insert(renderItems.end(), shadowItems.begin(),
-                         shadowItems.end());
-    }
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = pbrPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = tonemapPass});
-    renderItems.push_back(RenderItem{.mesh = &lightQuad,
-                                     .descriptorBindings = nullptr,
-                                     .targetPass = debugPresentPass});
+    AppSceneController::rebuildRenderItems(
+        renderItems, sceneModel, debugUiSettings, geometryPass,
+        directionalShadowPass, spotShadowPasses, lightQuad, pbrPass,
+        tonemapPass, debugPresentPass);
   }
 
   void reloadSceneModel() {
@@ -363,34 +160,14 @@ private:
     reloadSceneModel();
   }
 
-  void registerShadowPasses() {
-    auto directionalShadowPassLocal = std::make_unique<ShadowPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
-                     .cullMode = vk::CullModeFlagBits::eBack,
-                     .frontFace = vk::FrontFace::eCounterClockwise,
-                     .enableDepthBias = true},
-        MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
-    directionalShadowPass = directionalShadowPassLocal.get();
-    renderer.addPass(std::move(directionalShadowPassLocal));
-
-    for (uint32_t index = 0; index < MAX_SPOT_SHADOW_PASSES; ++index) {
-      auto spotShadowPassLocal = std::make_unique<ShadowPass>(
-          PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/shadow_pass.spv",
-                       .cullMode = vk::CullModeFlagBits::eBack,
-                       .frontFace = vk::FrontFace::eCounterClockwise,
-                       .enableDepthBias = true},
-          MAX_FRAMES_IN_FLIGHT, SHADOW_MAP_RESOLUTION);
-      spotShadowPasses[index] = spotShadowPassLocal.get();
-      renderer.addPass(std::move(spotShadowPassLocal));
-    }
-  }
-
   void initVulkan() {
     backend.initialize(window, config);
     ensureDefaultEnvironmentPath();
 
     sampler.create(deviceContext());
-    registerShadowPasses();
+    AppRendererSetup::registerShadowPasses(
+        renderer, directionalShadowPass, spotShadowPasses, MAX_FRAMES_IN_FLIGHT,
+        SHADOW_MAP_RESOLUTION, ASSET_PATH);
 
     lightQuad = buildFullscreenQuadMesh();
     lightQuad.createVertexBuffer(commandContext(), deviceContext());
@@ -410,76 +187,20 @@ private:
     directionalLightMarkerMesh.createIndexBuffer(commandContext(),
                                                  deviceContext());
 
-    auto geometryPassLocal = std::make_unique<GeometryPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/geometry_pass.spv",
-                     .cullMode = vk::CullModeFlagBits::eNone,
-                     .frontFace = vk::FrontFace::eCounterClockwise});
-    auto *geometryPassPtr = geometryPassLocal.get();
-    geometryPass = geometryPassPtr;
-    renderer.addPass(std::move(geometryPassLocal));
-
-    auto pbrPassLocal = std::make_unique<PbrPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/pbr_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr);
-    pbrPass = pbrPassLocal.get();
     if (debugUiSettings.syncSkySunToLight) {
       syncProceduralSkySunWithLight();
     }
     imageBasedLighting.create(deviceContext(), commandContext(),
                               debugUiSettings.iblBakeSettings);
-    pbrPass->setImageBasedLighting(imageBasedLighting);
-    pbrPass->setShadowPass(0, *directionalShadowPass);
-    for (uint32_t index = 0; index < MAX_SPOT_SHADOW_PASSES; ++index) {
-      pbrPass->setShadowPass(index + 1, *spotShadowPasses[index]);
-    }
-    renderer.addPass(std::move(pbrPassLocal));
-
-    auto tonemapPassLocal = std::make_unique<TonemapPass>(
-        PipelineSpec{.shaderPath = ASSET_PATH + "/shaders/tonemap_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, pbrPass);
-    tonemapPass = tonemapPassLocal.get();
-    renderer.addPass(std::move(tonemapPassLocal));
-
-    auto debugPresentPassLocal = std::make_unique<DebugPresentPass>(
-        PipelineSpec{.shaderPath =
-                         ASSET_PATH + "/shaders/debug_gbuffer_pass.spv",
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false},
-        MAX_FRAMES_IN_FLIGHT, geometryPassPtr, pbrPass, tonemapPass,
-        directionalShadowPass, spotShadowPasses);
-    debugPresentPass = debugPresentPassLocal.get();
-    debugPresentPass->setSelectedOutput(
-        static_cast<uint32_t>(debugUiSettings.presentedOutput));
-    debugPresentPass->setClipPlanes(CAMERA_NEAR_PLANE,
-                                    debugUiSettings.cameraFarPlane);
-    renderer.addPass(std::move(debugPresentPassLocal));
-
-    auto debugOverlayPassLocal = std::make_unique<DebugOverlayPass>(
-        PipelineSpec{.shaderPath =
-                         ASSET_PATH + "/shaders/debug_overlay_pass.spv",
-                     .topology = vk::PrimitiveTopology::eLineList,
-                     .cullMode = vk::CullModeFlagBits::eNone,
-                     .enableDepthTest = false,
-                     .enableDepthWrite = false,
-                     .enableBlending = true},
-        MAX_FRAMES_IN_FLIGHT, &debugUiSettings.sceneLights);
-    debugOverlayPass = debugOverlayPassLocal.get();
-    debugOverlayPass->setPointMarkerMesh(pointLightMarkerMesh);
-    debugOverlayPass->setSpotMarkerMesh(spotLightMarkerMesh);
-    debugOverlayPass->setDirectionalMarkerMesh(directionalLightMarkerMesh);
-    debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
-    debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-    debugOverlayPass->setDirectionalAnchor(sceneObjectsAnchor());
-    renderer.addPass(std::move(debugOverlayPassLocal));
-
-    auto imguiPassLocal = std::make_unique<ImGuiPass>(
-        window, backend.instance(), commandContext());
-    imguiPass = imguiPassLocal.get();
-    renderer.addPass(std::move(imguiPassLocal));
+    AppRendererSetup::registerMainPasses(
+        renderer, geometryPass, pbrPass, tonemapPass, debugPresentPass,
+        debugOverlayPass, imguiPass, window, backend.instance(),
+        commandContext(), debugUiSettings, imageBasedLighting,
+        directionalShadowPass, spotShadowPasses, pointLightMarkerMesh,
+        spotLightMarkerMesh, directionalLightMarkerMesh,
+        debugUiSettings.sceneLights,
+        AppSceneController::sceneObjectsAnchor(debugUiSettings),
+        MAX_FRAMES_IN_FLIGHT, CAMERA_NEAR_PLANE, ASSET_PATH);
 
     renderer.initialize(deviceContext(), swapchainContext());
 
@@ -513,112 +234,6 @@ private:
     return radiance;
   }
 
-  static glm::vec3 shadowUpVector(const glm::vec3 &direction) {
-    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-    if (std::abs(glm::dot(direction, worldUp)) > 0.98f) {
-      return glm::vec3(0.0f, 0.0f, 1.0f);
-    }
-    return worldUp;
-  }
-
-  glm::mat4 buildDirectionalShadowMatrix(const SceneLight &light) const {
-    const glm::vec3 direction = glm::normalize(light.direction);
-    const float shadowExtent =
-        std::max(debugUiSettings.directionalShadowExtent, 0.5f);
-    const float nearPlane =
-        std::max(debugUiSettings.directionalShadowNearPlane, 0.01f);
-    const float farPlane =
-        std::max(debugUiSettings.directionalShadowFarPlane, nearPlane + 0.5f);
-    const glm::vec3 target = sceneObjectsAnchor();
-    const glm::vec3 eye = target - direction * (farPlane * 0.5f);
-    const glm::mat4 view = glm::lookAt(eye, target, shadowUpVector(direction));
-    glm::mat4 proj = glm::ortho(-shadowExtent, shadowExtent, -shadowExtent,
-                                shadowExtent, nearPlane, farPlane);
-    proj[1][1] *= -1.0f;
-    return proj * view;
-  }
-
-  glm::mat4 buildSpotShadowMatrix(const SceneLight &light) const {
-    const glm::vec3 direction = glm::normalize(light.direction);
-    const float nearPlane = 0.05f;
-    const float farPlane = std::max(light.range, nearPlane + 0.05f);
-    const float fovRadians =
-        std::clamp(light.outerConeAngleRadians * 2.0f, glm::radians(1.0f),
-                   glm::radians(179.0f));
-    const glm::mat4 view = glm::lookAt(
-        light.position, light.position + direction, shadowUpVector(direction));
-    glm::mat4 proj = glm::perspective(fovRadians, 1.0f, nearPlane, farPlane);
-    proj[1][1] *= -1.0f;
-    return proj * view;
-  }
-
-  void configureShadowPasses(const GeometryUniformData &geometryUniformData) {
-    if (pbrPass == nullptr) {
-      return;
-    }
-
-    pbrPass->clearLightShadows();
-
-    if (directionalShadowPass != nullptr) {
-      directionalShadowPass->setEnabled(false);
-      directionalShadowPass->setLightViewProj(glm::mat4(1.0f));
-    }
-    for (ShadowPass *spotShadowPass : spotShadowPasses) {
-      if (spotShadowPass == nullptr) {
-        continue;
-      }
-      spotShadowPass->setEnabled(false);
-      spotShadowPass->setLightViewProj(glm::mat4(1.0f));
-    }
-
-    if (!debugUiSettings.shadowsEnabled) {
-      return;
-    }
-
-    bool directionalAssigned = false;
-    uint32_t spotShadowSlot = 0;
-    const auto &lights = debugUiSettings.sceneLights.lights();
-    for (size_t sceneLightIndex = 0; sceneLightIndex < lights.size();
-         ++sceneLightIndex) {
-      const auto &light = lights[sceneLightIndex];
-      if (!light.enabled || !light.castsShadow) {
-        continue;
-      }
-
-      const auto uniformLightIndex =
-          pbrPass->uniformLightIndexForSceneLight(sceneLightIndex);
-      if (!uniformLightIndex.has_value()) {
-        continue;
-      }
-
-      if (light.type == SceneLightType::Directional && !directionalAssigned &&
-          directionalShadowPass != nullptr) {
-        const glm::mat4 shadowMatrix = buildDirectionalShadowMatrix(light);
-        directionalShadowPass->setEnabled(true);
-        directionalShadowPass->setLightViewProj(shadowMatrix);
-        pbrPass->setLightShadow(
-            *uniformLightIndex, 0, shadowMatrix, light.shadowBias,
-            light.shadowNormalBias,
-            static_cast<float>(directionalShadowPass->resolution()));
-        directionalAssigned = true;
-        continue;
-      }
-
-      if (light.type == SceneLightType::Spot &&
-          spotShadowSlot < MAX_SPOT_SHADOW_PASSES &&
-          spotShadowPasses[spotShadowSlot] != nullptr) {
-        const glm::mat4 shadowMatrix = buildSpotShadowMatrix(light);
-        spotShadowPasses[spotShadowSlot]->setEnabled(true);
-        spotShadowPasses[spotShadowSlot]->setLightViewProj(shadowMatrix);
-        pbrPass->setLightShadow(
-            *uniformLightIndex, spotShadowSlot + 1, shadowMatrix,
-            light.shadowBias, light.shadowNormalBias,
-            static_cast<float>(spotShadowPasses[spotShadowSlot]->resolution()));
-        ++spotShadowSlot;
-      }
-    }
-  }
-
   void drawFrame() {
     auto frameState = backend.beginFrame(window);
 
@@ -643,6 +258,8 @@ private:
         smoothedFrameTimeMs > 0.0f ? 1000.0f / smoothedFrameTimeMs : 0.0f;
 
     if (imguiPass != nullptr) {
+      const uint32_t activeShadowPasses = ShadowSystem::activeShadowPassCount(
+          debugUiSettings, pbrPass, directionalShadowPass, spotShadowPasses);
       imguiPass->beginFrame();
       DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
           sceneModel, debugUiSettings,
@@ -652,7 +269,10 @@ private:
               .currentPrimaryDirectionalLightWorld =
                   [this]() { return currentPrimaryDirectionalLightWorld(); },
           },
-          currentPerformanceStats(smoothedFps, smoothedFrameTimeMs),
+          AppPerformanceStats::build(smoothedFps, smoothedFrameTimeMs,
+                                     debugUiSettings, sceneModel, renderItems,
+                                     geometryPass, pbrPass, tonemapPass,
+                                     debugPresentPass, activeShadowPasses),
           imguiPass->dockspaceId());
       const DefaultDebugUIResult uiResult = defaultDebugUi.build();
       if (uiResult.materialChanged) {
@@ -730,7 +350,10 @@ private:
       pbrPass->setDielectricSpecularScale(
           debugUiSettings.dielectricSpecularScale);
       pbrPass->setDebugView(debugUiSettings.pbrDebugView);
-      configureShadowPasses(geometryUniformData);
+      ShadowSystem::configure(
+          debugUiSettings,
+          AppSceneController::sceneObjectsAnchor(debugUiSettings), pbrPass,
+          directionalShadowPass, spotShadowPasses);
     }
     if (debugOverlayPass != nullptr) {
       debugOverlayPass->setCamera(geometryUniformData.view,
@@ -738,7 +361,8 @@ private:
       debugOverlayPass->setSceneLights(debugUiSettings.sceneLights);
       debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
       debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-      debugOverlayPass->setDirectionalAnchor(sceneObjectsAnchor());
+      debugOverlayPass->setDirectionalAnchor(
+          AppSceneController::sceneObjectsAnchor(debugUiSettings));
     }
     if (tonemapPass != nullptr) {
       const glm::vec3 lightRadiance = estimatedSceneLightRadiance();
