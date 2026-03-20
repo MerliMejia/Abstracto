@@ -90,7 +90,6 @@ struct DefaultDebugUISettings {
 };
 
 struct DefaultDebugUICallbacks {
-  std::function<void()> reloadSceneModel;
   std::function<void()> syncProceduralSkySunWithLight;
   std::function<glm::vec3()> currentPrimaryDirectionalLightWorld;
 };

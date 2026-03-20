@@ -388,18 +388,12 @@ void GltfModelAsset::load(const std::string &path) {
     std::vector<uint32_t> localToGlobal;
     localToGlobal.reserve(positionAccessor.count);
 
-    const glm::mat3 normalMatrix =
-        glm::transpose(glm::inverse(glm::mat3(worldTransform)));
-
     for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count;
          ++vertexIndex) {
-      const glm::vec3 position = glm::vec3(
-          worldTransform *
-          glm::vec4(readVec3(model, positionAccessor, vertexIndex), 1.0f));
-      glm::vec3 normal =
-          normalAccessor == nullptr
-              ? glm::vec3(0.0f, 0.0f, 1.0f)
-              : normalMatrix * readVec3(model, *normalAccessor, vertexIndex);
+      const glm::vec3 position = readVec3(model, positionAccessor, vertexIndex);
+      glm::vec3 normal = normalAccessor == nullptr
+                             ? glm::vec3(0.0f, 0.0f, 1.0f)
+                             : readVec3(model, *normalAccessor, vertexIndex);
       if (glm::length(normal) < 0.0001f) {
         normal = {0.0f, 0.0f, 1.0f};
       } else {
@@ -430,6 +424,7 @@ void GltfModelAsset::load(const std::string &path) {
         .indexCount = 0,
         .materialIndex = primitive.material >= 0 ? primitive.material : -1,
         .shapeIndex = static_cast<uint32_t>(nodeIndex),
+        .transform = worldTransform,
     };
 
     if (primitive.indices >= 0) {

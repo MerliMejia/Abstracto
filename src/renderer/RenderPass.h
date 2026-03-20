@@ -6,6 +6,8 @@
 #include "../renderable/Mesh.h"
 #include <vector>
 
+#include <glm/glm.hpp>
+
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #include <vulkan/vulkan_raii.hpp>
 #else
@@ -20,6 +22,8 @@ struct RenderItem {
   const RenderPass *targetPass = nullptr;
   uint32_t indexOffset = 0;
   uint32_t indexCount = 0;
+  glm::mat4 modelMatrix{1.0f};
+  glm::mat4 modelNormalMatrix{1.0f};
 };
 
 struct RenderPassContext {

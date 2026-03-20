@@ -4,6 +4,10 @@
 #include "../renderer/UniformSceneRenderPass.h"
 #include <glm/glm.hpp>
 
+struct ShadowPassPushConstant {
+  glm::mat4 model{1.0f};
+};
+
 struct ShadowPassUniformData {
   glm::mat4 model{1.0f};
   glm::mat4 lightViewProj{1.0f};
@@ -62,8 +66,7 @@ protected:
     return VertexInputLayoutSpec{
         .bindings = {GeometryVertex::getBindingDescription()},
         .attributes = {vk::VertexInputAttributeDescription(
-            0, 0, vk::Format::eR32G32B32Sfloat,
-            offsetof(GeometryVertex, pos))},
+            0, 0, vk::Format::eR32G32B32Sfloat, offsetof(GeometryVertex, pos))},
     };
   }
 
@@ -87,6 +90,21 @@ protected:
 
   bool shouldDrawRenderItem(const RenderItem &renderItem) const override {
     return enabled && SceneRenderPass::shouldDrawRenderItem(renderItem);
+  }
+
+  std::vector<vk::PushConstantRange> extraPushConstantRanges() const override {
+    return {vk::PushConstantRange{
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        .offset = 0,
+        .size = sizeof(ShadowPassPushConstant),
+    }};
+  }
+
+  void bindPerRenderItemResources(const RenderPassContext &context,
+                                  const RenderItem &renderItem) override {
+    ShadowPassPushConstant push{.model = renderItem.modelMatrix};
+    context.commandBuffer.pushConstants<ShadowPassPushConstant>(
+        *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});
   }
 
 private:

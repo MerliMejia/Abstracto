@@ -26,6 +26,7 @@
 #include <exception>
 #include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <iostream>
 #include <memory>
 
@@ -115,22 +116,113 @@ private:
     }
   }
 
-  SceneObject &primarySceneObject() {
-    ensureSceneObjects(debugUiSettings);
-    return debugUiSettings.sceneObjects.front();
+  static glm::mat4 sceneTransformMatrix(const SceneTransform &transform) {
+    glm::mat4 matrix(1.0f);
+    matrix = glm::translate(matrix, transform.position);
+    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.x),
+                         glm::vec3(1.0f, 0.0f, 0.0f));
+    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.y),
+                         glm::vec3(0.0f, 1.0f, 0.0f));
+    matrix = glm::rotate(matrix, glm::radians(transform.rotationDegrees.z),
+                         glm::vec3(0.0f, 0.0f, 1.0f));
+    return glm::scale(matrix, transform.scale);
   }
 
-  const SceneObject &primarySceneObject() const {
-    if (debugUiSettings.sceneObjects.empty()) {
-      throw std::runtime_error("Default scene object is not available");
+  static SceneTransform sceneTransformFromMatrix(const glm::mat4 &matrix) {
+    SceneTransform transform;
+    transform.position = glm::vec3(matrix[3]);
+
+    glm::mat3 rotationMatrix(matrix);
+    transform.scale.x = glm::length(rotationMatrix[0]);
+    transform.scale.y = glm::length(rotationMatrix[1]);
+    transform.scale.z = glm::length(rotationMatrix[2]);
+
+    if (transform.scale.x > 1e-6f) {
+      rotationMatrix[0] /= transform.scale.x;
     }
-    return debugUiSettings.sceneObjects.front();
+    if (transform.scale.y > 1e-6f) {
+      rotationMatrix[1] /= transform.scale.y;
+    }
+    if (transform.scale.z > 1e-6f) {
+      rotationMatrix[2] /= transform.scale.z;
+    }
+
+    transform.rotationDegrees =
+        glm::degrees(glm::eulerAngles(glm::quat_cast(rotationMatrix)));
+    return transform;
+  }
+
+  glm::vec3 sceneObjectsAnchor() const {
+    if (debugUiSettings.sceneObjects.empty()) {
+      return glm::vec3(0.0f);
+    }
+
+    glm::vec3 anchor(0.0f);
+    for (const auto &object : debugUiSettings.sceneObjects) {
+      anchor += object.transform.position;
+    }
+    return anchor / static_cast<float>(debugUiSettings.sceneObjects.size());
+  }
+
+  std::vector<glm::mat4> sceneObjectMatrices() const {
+    std::vector<glm::mat4> matrices;
+    matrices.reserve(debugUiSettings.sceneObjects.size());
+    for (const auto &object : debugUiSettings.sceneObjects) {
+      matrices.push_back(sceneTransformMatrix(object.transform));
+    }
+    return matrices;
+  }
+
+  void syncSceneObjectsWithModel() {
+    const ModelAsset *asset = sceneModel.modelAsset();
+    if (asset == nullptr) {
+      ensureSceneObjects(debugUiSettings);
+      return;
+    }
+
+    const auto &submeshes = asset->submeshes();
+    if (submeshes.empty()) {
+      ensureSceneObjects(debugUiSettings);
+      return;
+    }
+
+    if (debugUiSettings.sceneObjects.size() == submeshes.size()) {
+      for (size_t index = 0; index < submeshes.size(); ++index) {
+        if (debugUiSettings.sceneObjects[index].name.empty()) {
+          debugUiSettings.sceneObjects[index].name = submeshes[index].name;
+        }
+      }
+      ensureSceneObjects(debugUiSettings);
+      return;
+    }
+
+    const glm::mat4 legacyRootMatrix =
+        debugUiSettings.sceneObjects.size() == 1
+            ? sceneTransformMatrix(
+                  debugUiSettings.sceneObjects.front().transform)
+            : glm::mat4(1.0f);
+
+    std::vector<SceneObject> sceneObjects;
+    sceneObjects.reserve(submeshes.size());
+    for (const auto &submesh : submeshes) {
+      sceneObjects.push_back(SceneObject{
+          .name = submesh.name.empty() ? "Scene Object" : submesh.name,
+          .transform =
+              sceneTransformFromMatrix(legacyRootMatrix * submesh.transform),
+      });
+    }
+
+    debugUiSettings.sceneObjects = std::move(sceneObjects);
+    ensureSceneObjects(debugUiSettings);
+    debugUiSettings.selectedLightIndex = -1;
   }
 
   void rebuildSceneRenderItems() {
-    renderItems = sceneModel.buildRenderItems(geometryPass);
+    const std::vector<glm::mat4> objectMatrices = sceneObjectMatrices();
+    renderItems = sceneModel.buildRenderItems(geometryPass, objectMatrices);
     if (directionalShadowPass != nullptr) {
-      auto shadowItems = sceneModel.buildRenderItems(directionalShadowPass);
+      auto shadowItems =
+          sceneModel.buildRenderItems(directionalShadowPass, objectMatrices);
       renderItems.insert(renderItems.end(), shadowItems.begin(),
                          shadowItems.end());
     }
@@ -138,7 +230,8 @@ private:
       if (spotShadowPass == nullptr) {
         continue;
       }
-      auto shadowItems = sceneModel.buildRenderItems(spotShadowPass);
+      auto shadowItems =
+          sceneModel.buildRenderItems(spotShadowPass, objectMatrices);
       renderItems.insert(renderItems.end(), shadowItems.begin(),
                          shadowItems.end());
     }
@@ -158,6 +251,7 @@ private:
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
                             sceneDescriptorSetLayout(), frameGeometryUniforms,
                             sampler, MAX_FRAMES_IN_FLIGHT);
+    syncSceneObjectsWithModel();
     rebuildSceneRenderItems();
   }
 
@@ -300,8 +394,7 @@ private:
     debugOverlayPass->setDirectionalMarkerMesh(directionalLightMarkerMesh);
     debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
     debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-    debugOverlayPass->setDirectionalAnchor(
-        primarySceneObject().transform.position);
+    debugOverlayPass->setDirectionalAnchor(sceneObjectsAnchor());
     renderer.addPass(std::move(debugOverlayPassLocal));
 
     auto imguiPassLocal = std::make_unique<ImGuiPass>(
@@ -315,6 +408,7 @@ private:
     sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
                             sceneDescriptorSetLayout(), frameGeometryUniforms,
                             sampler, MAX_FRAMES_IN_FLIGHT);
+    syncSceneObjectsWithModel();
     rebuildSceneRenderItems();
   }
 
@@ -356,7 +450,7 @@ private:
         std::max(debugUiSettings.directionalShadowNearPlane, 0.01f);
     const float farPlane =
         std::max(debugUiSettings.directionalShadowFarPlane, nearPlane + 0.5f);
-    const glm::vec3 target = primarySceneObject().transform.position;
+    const glm::vec3 target = sceneObjectsAnchor();
     const glm::vec3 eye = target - direction * (farPlane * 0.5f);
     const glm::mat4 view = glm::lookAt(eye, target, shadowUpVector(direction));
     glm::mat4 proj = glm::ortho(-shadowExtent, shadowExtent, -shadowExtent,
@@ -388,7 +482,6 @@ private:
 
     if (directionalShadowPass != nullptr) {
       directionalShadowPass->setEnabled(false);
-      directionalShadowPass->setModelMatrix(geometryUniformData.model);
       directionalShadowPass->setLightViewProj(glm::mat4(1.0f));
     }
     for (ShadowPass *spotShadowPass : spotShadowPasses) {
@@ -396,7 +489,6 @@ private:
         continue;
       }
       spotShadowPass->setEnabled(false);
-      spotShadowPass->setModelMatrix(geometryUniformData.model);
       spotShadowPass->setLightViewProj(glm::mat4(1.0f));
     }
 
@@ -476,7 +568,6 @@ private:
       DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
           sceneModel, debugUiSettings,
           DefaultDebugUICallbacks{
-              .reloadSceneModel = [this]() { reloadSceneModel(); },
               .syncProceduralSkySunWithLight =
                   [this]() { syncProceduralSkySunWithLight(); },
               .currentPrimaryDirectionalLightWorld =
@@ -520,27 +611,10 @@ private:
     DefaultDebugCameraController cameraController =
         DefaultDebugCameraController::create(debugUiSettings);
     cameraController.update(deltaSeconds, window.handle());
+    rebuildSceneRenderItems();
 
     GeometryUniformData geometryUniformData{};
-    const SceneObject &sceneObject = primarySceneObject();
-
     geometryUniformData.model = glm::mat4(1.0f);
-    geometryUniformData.model = glm::translate(geometryUniformData.model,
-                                               sceneObject.transform.position);
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(sceneObject.transform.rotationDegrees.x),
-                    glm::vec3(1.0f, 0.0f, 0.0f));
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(sceneObject.transform.rotationDegrees.y),
-                    glm::vec3(0.0f, 1.0f, 0.0f));
-    geometryUniformData.model =
-        glm::rotate(geometryUniformData.model,
-                    glm::radians(sceneObject.transform.rotationDegrees.z),
-                    glm::vec3(0.0f, 0.0f, 1.0f));
-    geometryUniformData.model =
-        glm::scale(geometryUniformData.model, sceneObject.transform.scale);
     geometryUniformData.modelNormal =
         glm::transpose(glm::inverse(geometryUniformData.model));
 
@@ -585,7 +659,7 @@ private:
       debugOverlayPass->setSceneLights(debugUiSettings.sceneLights);
       debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
       debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-      debugOverlayPass->setDirectionalAnchor(sceneObject.transform.position);
+      debugOverlayPass->setDirectionalAnchor(sceneObjectsAnchor());
     }
     if (tonemapPass != nullptr) {
       const glm::vec3 lightRadiance = estimatedSceneLightRadiance();

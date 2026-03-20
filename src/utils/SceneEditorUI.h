@@ -137,9 +137,6 @@ private:
     ImGui::SliderFloat3("Rotation", &object.transform.rotationDegrees.x,
                         -180.0f, 180.0f);
     ImGui::DragFloat3("Scale", &object.transform.scale.x, 0.1f, 0.01f, 200.0f);
-    if (ImGui::Button("Reload Model")) {
-      bindings.callbacks.reloadSceneModel();
-    }
     ImGui::End();
   }
 

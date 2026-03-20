@@ -9,6 +9,7 @@
 #include "Sampler.h"
 #include <filesystem>
 #include <functional>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
@@ -66,7 +67,9 @@ public:
     throw std::runtime_error("unsupported model format: " + extension);
   }
 
-  std::vector<RenderItem> buildRenderItems(const RenderPass *targetPass) {
+  std::vector<RenderItem>
+  buildRenderItems(const RenderPass *targetPass,
+                   const std::vector<glm::mat4> &itemModelMatrices = {}) {
     if (asset == nullptr) {
       throw std::runtime_error("RenderableModel has no loaded asset");
     }
@@ -76,15 +79,27 @@ public:
     items.reserve(submeshes.empty() ? 1 : submeshes.size());
 
     if (submeshes.empty()) {
+      const glm::mat4 modelMatrix = itemModelMatrices.empty()
+                                        ? glm::mat4(1.0f)
+                                        : itemModelMatrices.front();
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
           .descriptorBindings = &materialSet.bindingsForMaterialIndex(-1),
           .targetPass = targetPass,
+          .modelMatrix = modelMatrix,
+          .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
       });
       return items;
     }
 
-    for (const auto &submesh : submeshes) {
+    for (size_t index = 0; index < submeshes.size(); ++index) {
+      const auto &submesh = submeshes[index];
+      glm::mat4 modelMatrix = submesh.transform;
+      if (itemModelMatrices.size() == 1) {
+        modelMatrix = itemModelMatrices.front() * submesh.transform;
+      } else if (itemModelMatrices.size() == submeshes.size()) {
+        modelMatrix = itemModelMatrices[index];
+      }
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
           .descriptorBindings =
@@ -92,6 +107,8 @@ public:
           .targetPass = targetPass,
           .indexOffset = submesh.indexOffset,
           .indexCount = submesh.indexCount,
+          .modelMatrix = modelMatrix,
+          .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
       });
     }
 

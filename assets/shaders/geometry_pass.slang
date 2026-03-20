@@ -17,6 +17,11 @@ struct GeometryData {
     float4x4 proj;
 };
 
+struct GeometryObjectData {
+    float4x4 model;
+    float4x4 modelNormal;
+};
+
 struct MaterialData {
     float4 baseColorFactor;
     float4 emissiveFactor;
@@ -36,15 +41,17 @@ struct FSOutput {
 [[vk::binding(3, 0)]] Sampler2D emissiveTexture;
 [[vk::binding(4, 0)]] Sampler2D occlusionTexture;
 [[vk::binding(5, 0)]] ConstantBuffer<MaterialData> materialParams;
+[[vk::push_constant]]
+ConstantBuffer<GeometryObjectData> objectData;
 
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput o;
-    float4 worldPos = mul(ubo.model, float4(input.position, 1.0));
+    float4 worldPos = mul(objectData.model, float4(input.position, 1.0));
     float4 viewPos = mul(ubo.view, worldPos);
     o.position = mul(ubo.proj, viewPos);
 
-    o.normalWS = normalize(mul((float3x3)ubo.modelNormal, input.normal));
+    o.normalWS = normalize(mul((float3x3)objectData.modelNormal, input.normal));
     o.uv = input.uv;
     return o;
 }

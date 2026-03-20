@@ -2,8 +2,12 @@
 
 #include "../renderer/SceneRenderPass.h"
 #include "vulkan/vulkan.hpp"
-#include <algorithm>
 #include <vector>
+
+struct GeometryPassPushConstant {
+  glm::mat4 model{1.0f};
+  glm::mat4 modelNormal{1.0f};
+};
 
 class GeometryPass : public SceneRenderPass {
 public:
@@ -51,5 +55,24 @@ protected:
         .bindings = {GeometryVertex::getBindingDescription()},
         .attributes = {attrs.begin(), attrs.end()},
     };
+  }
+
+  std::vector<vk::PushConstantRange> pushConstantRanges() const override {
+    return {vk::PushConstantRange{
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        .offset = 0,
+        .size = sizeof(GeometryPassPushConstant),
+    }};
+  }
+
+  void bindRenderItemResources(const RenderPassContext &context,
+                               const RenderItem &renderItem) override {
+    SceneRenderPass::bindRenderItemResources(context, renderItem);
+    GeometryPassPushConstant push{
+        .model = renderItem.modelMatrix,
+        .modelNormal = renderItem.modelNormalMatrix,
+    };
+    context.commandBuffer.pushConstants<GeometryPassPushConstant>(
+        *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});
   }
 };
