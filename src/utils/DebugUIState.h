@@ -207,6 +207,7 @@ struct DefaultDebugUIPerformanceStats {
   uint32_t vertexCount = 0;
   uint32_t triangleCount = 0;
   uint32_t drawCallCount = 0;
+  uint32_t preparedDrawCallCount = 0;
   uint32_t sceneDrawCallCount = 0;
   uint32_t shadowDrawCallCount = 0;
 };

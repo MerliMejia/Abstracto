@@ -217,6 +217,37 @@ private:
     debugUiSettings.selectedLightIndex = -1;
   }
 
+  uint32_t activeShadowPassCount() const {
+    if (!debugUiSettings.shadowsEnabled) {
+      return 0;
+    }
+
+    bool directionalAssigned = false;
+    uint32_t spotShadowSlot = 0;
+    const auto &lights = debugUiSettings.sceneLights.lights();
+    for (size_t sceneLightIndex = 0; sceneLightIndex < lights.size();
+         ++sceneLightIndex) {
+      const auto &light = lights[sceneLightIndex];
+      if (!light.enabled || !light.castsShadow) {
+        continue;
+      }
+
+      if (light.type == SceneLightType::Directional && !directionalAssigned &&
+          directionalShadowPass != nullptr) {
+        directionalAssigned = true;
+        continue;
+      }
+
+      if (light.type == SceneLightType::Spot &&
+          spotShadowSlot < MAX_SPOT_SHADOW_PASSES &&
+          spotShadowPasses[spotShadowSlot] != nullptr) {
+        ++spotShadowSlot;
+      }
+    }
+
+    return (directionalAssigned ? 1u : 0u) + spotShadowSlot;
+  }
+
   DefaultDebugUIPerformanceStats
   currentPerformanceStats(float fps, float frameTimeMs) const {
     DefaultDebugUIPerformanceStats stats{
@@ -235,7 +266,7 @@ private:
           static_cast<uint32_t>(asset->mesh().getIndices().size() / 3);
     }
 
-    stats.drawCallCount = static_cast<uint32_t>(renderItems.size());
+    uint32_t postProcessDrawCallCount = 0;
     for (const auto &renderItem : renderItems) {
       if (renderItem.targetPass == geometryPass) {
         ++stats.sceneDrawCallCount;
@@ -247,11 +278,20 @@ private:
       }
       for (const ShadowPass *spotShadowPass : spotShadowPasses) {
         if (renderItem.targetPass == spotShadowPass) {
-          ++stats.shadowDrawCallCount;
           break;
         }
       }
+      if (renderItem.targetPass == pbrPass || renderItem.targetPass == tonemapPass ||
+          renderItem.targetPass == debugPresentPass) {
+        ++postProcessDrawCallCount;
+      }
     }
+
+    stats.preparedDrawCallCount = static_cast<uint32_t>(renderItems.size());
+    stats.shadowDrawCallCount =
+        stats.sceneDrawCallCount * activeShadowPassCount();
+    stats.drawCallCount = stats.sceneDrawCallCount +
+                          stats.shadowDrawCallCount + postProcessDrawCallCount;
 
     return stats;
   }

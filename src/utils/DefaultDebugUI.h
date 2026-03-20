@@ -139,6 +139,10 @@ private:
 
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
+      ImGui::Text("Prepared Draws: %u",
+                  performanceStats.preparedDrawCallCount);
+
+      ImGui::TableNextColumn();
       ImGui::Text("Scene Draws: %u", performanceStats.sceneDrawCallCount);
 
       ImGui::TableNextColumn();
