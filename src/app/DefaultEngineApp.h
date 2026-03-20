@@ -63,7 +63,9 @@ private:
   PassRenderer renderer;
   std::vector<RenderItem> renderItems;
 
-  RenderableModel sceneModel;
+  std::vector<SceneAssetInstance> sceneAssets;
+  std::vector<RenderableModel> sceneAssetModels;
+  RenderableModel emptyEditorModel;
   FullscreenMesh lightQuad;
   TypedMesh<Vertex> pointLightMarkerMesh;
   TypedMesh<Vertex> spotLightMarkerMesh;
@@ -103,15 +105,87 @@ private:
     return resolvedDebugSessionPath(engineConfig);
   }
 
-  std::string sceneModelPath() const {
-    if (!sceneDefinition.modelPath.empty()) {
-      return sceneDefinition.modelPath;
+  std::vector<SceneAssetInstance> resolvedSceneAssets() const {
+    if (!sceneDefinition.assets.empty()) {
+      return sceneDefinition.assets;
     }
-    return engineConfig.assetPath + "/models/night.glb";
+    if (!sceneDefinition.modelPath.empty()) {
+      return {SceneAssetInstance{.assetPath = sceneDefinition.modelPath}};
+    }
+    return {};
+  }
+
+  RenderableModel &currentEditorModel() {
+    if (debugUiSettings.selectedLightIndex >= 0 || sceneAssetModels.empty() ||
+        debugUiSettings.sceneObjects.empty()) {
+      return emptyEditorModel;
+    }
+
+    const size_t selectedIndex =
+        static_cast<size_t>(debugUiSettings.selectedObjectIndex);
+    if (selectedIndex >= sceneAssetModels.size()) {
+      return emptyEditorModel;
+    }
+    return sceneAssetModels[selectedIndex];
+  }
+
+  uint32_t totalMaterialCount() const {
+    uint32_t total = 0;
+    for (const auto &sceneAssetModel : sceneAssetModels) {
+      if (sceneAssetModel.modelAsset() == nullptr) {
+        continue;
+      }
+      total += static_cast<uint32_t>(sceneAssetModel.materials().size());
+    }
+    return total;
+  }
+
+  uint32_t totalVertexCount() const {
+    uint32_t total = 0;
+    for (const auto &sceneAssetModel : sceneAssetModels) {
+      const ModelAsset *asset = sceneAssetModel.modelAsset();
+      if (asset == nullptr) {
+        continue;
+      }
+      total += static_cast<uint32_t>(asset->mesh().vertexCount());
+    }
+    return total;
+  }
+
+  uint32_t totalTriangleCount() const {
+    uint32_t total = 0;
+    for (const auto &sceneAssetModel : sceneAssetModels) {
+      const ModelAsset *asset = sceneAssetModel.modelAsset();
+      if (asset == nullptr) {
+        continue;
+      }
+      total += static_cast<uint32_t>(asset->mesh().getIndices().size() / 3);
+    }
+    return total;
   }
 
   DefaultDebugUISettings buildBaseDebugUiSettings() const {
     DefaultDebugUISettings settings;
+    const std::vector<SceneAssetInstance> initialSceneAssets =
+        resolvedSceneAssets();
+    if (initialSceneAssets.empty()) {
+      settings.sceneObjects.clear();
+    } else {
+      settings.sceneObjects.clear();
+      settings.sceneObjects.reserve(initialSceneAssets.size());
+      for (size_t index = 0; index < initialSceneAssets.size(); ++index) {
+        const auto &sceneAsset = initialSceneAssets[index];
+        settings.sceneObjects.push_back(SceneObject{
+            .name = sceneAsset.name.empty()
+                        ? std::filesystem::path(sceneAsset.assetPath)
+                              .stem()
+                              .string()
+                        : sceneAsset.name,
+            .transform = sceneAsset.transform,
+            .visible = sceneAsset.visible,
+        });
+      }
+    }
     settings.sceneLights = sceneDefinition.sceneLights;
     settings.iblBakeSettings.environmentHdrPath =
         resolvedDefaultEnvironmentHdrPath(engineConfig);
@@ -121,7 +195,7 @@ private:
     if (sceneDefinition.configureSettings) {
       sceneDefinition.configureSettings(settings);
     }
-    ensureSceneObjects(settings);
+    clampSceneObjectSelection(settings);
     return settings;
   }
 
@@ -145,25 +219,35 @@ private:
     }
   }
 
-  void syncSceneObjectsWithModel() {
-    AppSceneController::syncSceneObjectsWithModel(debugUiSettings, sceneModel);
+  void syncSceneObjectsWithAssets() {
+    AppSceneController::syncSceneObjectsWithAssets(debugUiSettings, sceneAssets);
     AppSceneController::applyObjectOverrides(debugUiSettings,
                                              sceneDefinition.objectOverrides);
   }
 
   void rebuildSceneRenderItems() {
     AppSceneController::rebuildRenderItems(
-        renderItems, sceneModel, debugUiSettings, geometryPass,
+        renderItems, sceneAssetModels, debugUiSettings, geometryPass,
         directionalShadowPass, spotShadowPasses, lightQuad, pbrPass,
         tonemapPass, debugPresentPass);
   }
 
-  void reloadSceneModel() {
+  void reloadSceneAssets() {
     backend.waitIdle();
-    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            sceneDescriptorSetLayout(), frameGeometryUniforms,
-                            sampler, DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
-    syncSceneObjectsWithModel();
+    sceneAssets = resolvedSceneAssets();
+    sceneAssetModels.clear();
+    sceneAssetModels.resize(sceneAssets.size());
+
+    for (size_t index = 0; index < sceneAssets.size(); ++index) {
+      if (sceneAssets[index].assetPath.empty()) {
+        continue;
+      }
+      sceneAssetModels[index].loadFromFile(
+          sceneAssets[index].assetPath, commandContext(), deviceContext(),
+          sceneDescriptorSetLayout(), frameGeometryUniforms, sampler,
+          DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
+    }
+    syncSceneObjectsWithAssets();
     rebuildSceneRenderItems();
   }
 
@@ -201,7 +285,7 @@ private:
     imageBasedLighting.rebuild(deviceContext(), commandContext(),
                                debugUiSettings.iblBakeSettings);
     renderer.recreate(deviceContext(), swapchainContext());
-    reloadSceneModel();
+    reloadSceneAssets();
   }
 
   void initVulkan() {
@@ -252,11 +336,7 @@ private:
 
     frameGeometryUniforms.create(deviceContext(),
                                  DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
-    sceneModel.loadFromFile(sceneModelPath(), commandContext(), deviceContext(),
-                            sceneDescriptorSetLayout(), frameGeometryUniforms,
-                            sampler, DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
-    syncSceneObjectsWithModel();
-    rebuildSceneRenderItems();
+    reloadSceneAssets();
   }
 
   glm::vec3 currentPrimaryDirectionalLightWorld() const {
@@ -307,23 +387,25 @@ private:
     if (imguiPass != nullptr) {
       const uint32_t activeShadowPasses = ShadowSystem::activeShadowPassCount(
           debugUiSettings, pbrPass, directionalShadowPass, spotShadowPasses);
+      RenderableModel &editorModel = currentEditorModel();
       imguiPass->beginFrame();
       DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
-          sceneModel, debugUiSettings,
+          editorModel, debugUiSettings,
           DefaultDebugUICallbacks{
               .syncProceduralSkySunWithLight =
                   [this]() { syncProceduralSkySunWithLight(); },
               .currentPrimaryDirectionalLightWorld =
                   [this]() { return currentPrimaryDirectionalLightWorld(); },
           },
-          AppPerformanceStats::build(smoothedFps, smoothedFrameTimeMs,
-                                     debugUiSettings, sceneModel, renderItems,
-                                     geometryPass, pbrPass, tonemapPass,
-                                     debugPresentPass, activeShadowPasses),
+          AppPerformanceStats::build(
+              smoothedFps, smoothedFrameTimeMs, debugUiSettings,
+              totalMaterialCount(), totalVertexCount(), totalTriangleCount(),
+              renderItems, geometryPass, pbrPass, tonemapPass, debugPresentPass,
+              activeShadowPasses),
           imguiPass->dockspaceId());
       const DefaultDebugUIResult uiResult = defaultDebugUi.build();
-      if (uiResult.materialChanged) {
-        sceneModel.syncMaterialParameters();
+      if (uiResult.materialChanged && editorModel.modelAsset() != nullptr) {
+        editorModel.syncMaterialParameters();
       }
       imguiPass->endFrame();
       if (uiResult.saveSessionRequested) {

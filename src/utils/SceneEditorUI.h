@@ -24,22 +24,11 @@ private:
     settings.selectedObjectIndex = index;
     settings.selectedLightIndex = -1;
 
-    const ModelAsset *asset = bindings.sceneModel.modelAsset();
-    if (asset == nullptr) {
+    if (bindings.sceneModel.modelAsset() == nullptr) {
       return;
     }
-
-    const auto &submeshes = asset->submeshes();
-    if (index < 0 || index >= static_cast<int>(submeshes.size())) {
-      return;
-    }
-
-    const int materialIndex =
-        submeshes[static_cast<size_t>(index)].materialIndex;
-    if (materialIndex >= 0 &&
-        materialIndex <
-            static_cast<int>(bindings.sceneModel.materials().size())) {
-      settings.selectedMaterialIndex = materialIndex;
+    if (!bindings.sceneModel.materials().empty()) {
+      settings.selectedMaterialIndex = 0;
     }
   }
 
@@ -76,7 +65,7 @@ private:
 
   void buildHierarchyPanel() {
     auto &settings = bindings.settings;
-    ensureSceneObjects(settings);
+    clampSceneObjectSelection(settings);
     const ModelAsset *asset = bindings.sceneModel.modelAsset();
     const auto &lights = settings.sceneLights.lights();
 
@@ -104,21 +93,21 @@ private:
     }
 
     ImGui::SeparatorText("Objects");
-    for (int index = 0; index < static_cast<int>(settings.sceneObjects.size());
-         ++index) {
-      const SceneObject &object =
-          settings.sceneObjects[static_cast<size_t>(index)];
-      std::string label = object.name.empty()
-                              ? "Scene Object " + std::to_string(index)
-                              : object.name;
-      if (asset != nullptr && index == 0) {
-        label +=
-            "##" + std::filesystem::path(asset->path()).filename().string();
-      }
-      const bool selected = settings.selectedLightIndex < 0 &&
-                            settings.selectedObjectIndex == index;
-      if (ImGui::Selectable(label.c_str(), selected)) {
-        selectObject(index);
+    if (settings.sceneObjects.empty()) {
+      ImGui::TextUnformatted("No objects in the scene.");
+    } else {
+      for (int index = 0; index < static_cast<int>(settings.sceneObjects.size());
+           ++index) {
+        const SceneObject &object =
+            settings.sceneObjects[static_cast<size_t>(index)];
+        std::string label = object.name.empty()
+                                ? "Scene Object " + std::to_string(index)
+                                : object.name;
+        const bool selected = settings.selectedLightIndex < 0 &&
+                              settings.selectedObjectIndex == index;
+        if (ImGui::Selectable(label.c_str(), selected)) {
+          selectObject(index);
+        }
       }
     }
 
@@ -141,15 +130,18 @@ private:
 
   bool buildInspectorPanel() {
     auto &settings = bindings.settings;
-    ensureSceneObjects(settings);
+    clampSceneObjectSelection(settings);
 
     ImGui::Begin("Inspector");
-    const bool objectSelected = settings.selectedLightIndex < 0;
+    const bool objectSelected =
+        settings.selectedLightIndex < 0 && !settings.sceneObjects.empty();
     bool materialChanged = false;
     if (objectSelected) {
       materialChanged = buildObjectInspector();
-    } else {
+    } else if (settings.selectedLightIndex >= 0) {
       buildLightInspector();
+    } else {
+      ImGui::TextUnformatted("Nothing selected.");
     }
     ImGui::End();
     return materialChanged;
@@ -157,6 +149,9 @@ private:
 
   bool buildObjectInspector() {
     auto &settings = bindings.settings;
+    if (settings.sceneObjects.empty()) {
+      return false;
+    }
     SceneObject &object =
         settings
             .sceneObjects[static_cast<size_t>(settings.selectedObjectIndex)];
@@ -180,6 +175,10 @@ private:
     ImGui::SliderFloat3("Rotation", &object.transform.rotationDegrees.x,
                         -180.0f, 180.0f);
     ImGui::DragFloat3("Scale", &object.transform.scale.x, 0.1f, 0.01f, 200.0f);
+
+    if (asset == nullptr) {
+      return false;
+    }
 
     auto &materials = bindings.sceneModel.mutableMaterials();
     if (materials.empty()) {

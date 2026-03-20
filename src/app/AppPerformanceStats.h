@@ -7,7 +7,7 @@ class AppPerformanceStats {
 public:
   static DefaultDebugUIPerformanceStats
   build(float fps, float frameTimeMs, const DefaultDebugUISettings &settings,
-        const RenderableModel &sceneModel,
+        uint32_t materialCount, uint32_t vertexCount, uint32_t triangleCount,
         const std::vector<RenderItem> &renderItems,
         const RenderPass *geometryPass, const RenderPass *pbrPass,
         const RenderPass *tonemapPass, const RenderPass *debugPresentPass,
@@ -17,16 +17,10 @@ public:
         .frameTimeMs = frameTimeMs,
         .objectCount = static_cast<uint32_t>(settings.sceneObjects.size()),
         .lightCount = static_cast<uint32_t>(settings.sceneLights.size()),
+        .materialCount = materialCount,
+        .vertexCount = vertexCount,
+        .triangleCount = triangleCount,
     };
-
-    const ModelAsset *asset = sceneModel.modelAsset();
-    if (asset != nullptr) {
-      stats.materialCount =
-          static_cast<uint32_t>(sceneModel.materials().size());
-      stats.vertexCount = static_cast<uint32_t>(asset->mesh().vertexCount());
-      stats.triangleCount =
-          static_cast<uint32_t>(asset->mesh().getIndices().size() / 3);
-    }
 
     uint32_t postProcessDrawCallCount = 0;
     for (const auto &renderItem : renderItems) {

@@ -5,9 +5,9 @@
 #include "../utils/DebugUIState.h"
 #include "SceneDefinition.h"
 #include <array>
+#include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <string_view>
 #include <vector>
 
 class AppSceneController {
@@ -69,57 +69,32 @@ public:
     return anchor / static_cast<float>(visibleObjectCount);
   }
 
-  static std::vector<glm::mat4>
-  sceneObjectMatrices(const DefaultDebugUISettings &settings) {
-    std::vector<glm::mat4> matrices;
-    matrices.reserve(settings.sceneObjects.size());
-    for (const auto &object : settings.sceneObjects) {
-      matrices.push_back(sceneTransformMatrix(object.transform));
-    }
-    return matrices;
-  }
-
-  static void syncSceneObjectsWithModel(DefaultDebugUISettings &settings,
-                                        const RenderableModel &sceneModel) {
-    const ModelAsset *asset = sceneModel.modelAsset();
-    if (asset == nullptr) {
-      ensureSceneObjects(settings);
-      return;
-    }
-
-    const auto &submeshes = asset->submeshes();
-    if (submeshes.empty()) {
-      ensureSceneObjects(settings);
-      return;
-    }
-
-    if (settings.sceneObjects.size() == submeshes.size()) {
-      for (size_t index = 0; index < submeshes.size(); ++index) {
+  static void syncSceneObjectsWithAssets(
+      DefaultDebugUISettings &settings,
+      const std::vector<SceneAssetInstance> &sceneAssets) {
+    if (settings.sceneObjects.size() == sceneAssets.size()) {
+      for (size_t index = 0; index < sceneAssets.size(); ++index) {
         if (settings.sceneObjects[index].name.empty()) {
-          settings.sceneObjects[index].name = submeshes[index].name;
+          settings.sceneObjects[index].name =
+              sceneAssetName(sceneAssets[index], index);
         }
       }
-      ensureSceneObjects(settings);
+      clampSceneObjectSelection(settings);
       return;
     }
 
-    const glm::mat4 legacyRootMatrix =
-        settings.sceneObjects.size() == 1
-            ? sceneTransformMatrix(settings.sceneObjects.front().transform)
-            : glm::mat4(1.0f);
-
-    std::vector<SceneObject> sceneObjects;
-    sceneObjects.reserve(submeshes.size());
-    for (const auto &submesh : submeshes) {
-      sceneObjects.push_back(SceneObject{
-          .name = submesh.name.empty() ? "Scene Object" : submesh.name,
-          .transform =
-              sceneTransformFromMatrix(legacyRootMatrix * submesh.transform),
+    settings.sceneObjects.clear();
+    settings.sceneObjects.reserve(sceneAssets.size());
+    for (size_t index = 0; index < sceneAssets.size(); ++index) {
+      const auto &sceneAsset = sceneAssets[index];
+      settings.sceneObjects.push_back(SceneObject{
+          .name = sceneAssetName(sceneAsset, index),
+          .transform = sceneAsset.transform,
+          .visible = sceneAsset.visible,
       });
     }
 
-    settings.sceneObjects = std::move(sceneObjects);
-    ensureSceneObjects(settings);
+    clampSceneObjectSelection(settings);
     settings.selectedLightIndex = -1;
   }
 
@@ -146,32 +121,41 @@ public:
 
   template <size_t SpotShadowPassCount>
   static void rebuildRenderItems(
-      std::vector<RenderItem> &renderItems, RenderableModel &sceneModel,
+      std::vector<RenderItem> &renderItems,
+      std::vector<RenderableModel> &sceneAssetModels,
       const DefaultDebugUISettings &settings, const RenderPass *geometryPass,
       const RenderPass *directionalShadowPass,
       const std::array<ShadowPass *, SpotShadowPassCount> &spotShadowPasses,
       Mesh &fullscreenQuad, const RenderPass *pbrPass,
       const RenderPass *tonemapPass, const RenderPass *debugPresentPass) {
-    const std::vector<glm::mat4> objectMatrices = sceneObjectMatrices(settings);
     renderItems.clear();
 
-    auto geometryItems =
-        sceneModel.buildRenderItems(geometryPass, objectMatrices);
-    appendVisibleItems(renderItems, geometryItems, settings);
-
-    if (directionalShadowPass != nullptr) {
-      auto shadowItems =
-          sceneModel.buildRenderItems(directionalShadowPass, objectMatrices);
-      appendVisibleItems(renderItems, shadowItems, settings);
-    }
-
-    for (ShadowPass *spotShadowPass : spotShadowPasses) {
-      if (spotShadowPass == nullptr) {
+    const size_t sceneAssetCount =
+        std::min(sceneAssetModels.size(), settings.sceneObjects.size());
+    for (size_t index = 0; index < sceneAssetCount; ++index) {
+      if (!settings.sceneObjects[index].visible ||
+          sceneAssetModels[index].modelAsset() == nullptr) {
         continue;
       }
-      auto shadowItems =
-          sceneModel.buildRenderItems(spotShadowPass, objectMatrices);
-      appendVisibleItems(renderItems, shadowItems, settings);
+
+      const std::vector<glm::mat4> objectMatrices = {
+          sceneTransformMatrix(settings.sceneObjects[index].transform)};
+
+      appendItems(renderItems, sceneAssetModels[index].buildRenderItems(
+                                   geometryPass, objectMatrices));
+
+      if (directionalShadowPass != nullptr) {
+        appendItems(renderItems, sceneAssetModels[index].buildRenderItems(
+                                     directionalShadowPass, objectMatrices));
+      }
+
+      for (ShadowPass *spotShadowPass : spotShadowPasses) {
+        if (spotShadowPass == nullptr) {
+          continue;
+        }
+        appendItems(renderItems, sceneAssetModels[index].buildRenderItems(
+                                     spotShadowPass, objectMatrices));
+      }
     }
 
     if (pbrPass != nullptr) {
@@ -192,20 +176,24 @@ public:
   }
 
 private:
-  static void appendVisibleItems(std::vector<RenderItem> &renderItems,
-                                 const std::vector<RenderItem> &sourceItems,
-                                 const DefaultDebugUISettings &settings) {
-    if (sourceItems.size() != settings.sceneObjects.size()) {
-      renderItems.insert(renderItems.end(), sourceItems.begin(),
-                         sourceItems.end());
-      return;
+  static std::string sceneAssetName(const SceneAssetInstance &sceneAsset,
+                                    size_t index) {
+    if (!sceneAsset.name.empty()) {
+      return sceneAsset.name;
     }
-
-    for (size_t index = 0; index < sourceItems.size(); ++index) {
-      if (!settings.sceneObjects[index].visible) {
-        continue;
+    if (!sceneAsset.assetPath.empty()) {
+      const std::string stem =
+          std::filesystem::path(sceneAsset.assetPath).stem().string();
+      if (!stem.empty()) {
+        return stem;
       }
-      renderItems.push_back(sourceItems[index]);
     }
+    return "Scene Asset " + std::to_string(index);
+  }
+
+  static void appendItems(std::vector<RenderItem> &renderItems,
+                          const std::vector<RenderItem> &sourceItems) {
+    renderItems.insert(renderItems.end(), sourceItems.begin(),
+                       sourceItems.end());
   }
 };

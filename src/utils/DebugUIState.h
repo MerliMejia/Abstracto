@@ -220,11 +220,19 @@ struct DefaultDebugUIBindings {
   ImGuiID dockspaceId = 0;
 };
 
-inline void ensureSceneObjects(DefaultDebugUISettings &settings) {
+inline void clampSceneObjectSelection(DefaultDebugUISettings &settings) {
   if (settings.sceneObjects.empty()) {
-    settings.sceneObjects.push_back(SceneObject{});
+    settings.selectedObjectIndex = 0;
+    return;
   }
   settings.selectedObjectIndex =
       std::clamp(settings.selectedObjectIndex, 0,
                  static_cast<int>(settings.sceneObjects.size()) - 1);
+}
+
+inline void ensureSceneObjects(DefaultDebugUISettings &settings) {
+  if (settings.sceneObjects.empty()) {
+    settings.sceneObjects.push_back(SceneObject{});
+  }
+  clampSceneObjectSelection(settings);
 }

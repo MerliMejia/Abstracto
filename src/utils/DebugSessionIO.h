@@ -23,13 +23,14 @@ inline glm::vec3 vec3FromJson(const json &value,
 }
 
 inline json sceneObjectToJson(const SceneObject &object) {
-  return {
+  json value = {
       {"name", object.name},
       {"visible", object.visible},
       {"position", vec3ToJson(object.transform.position)},
       {"rotationDegrees", vec3ToJson(object.transform.rotationDegrees)},
       {"scale", vec3ToJson(object.transform.scale)},
   };
+  return value;
 }
 
 inline SceneObject sceneObjectFromJson(const json &value) {
@@ -188,7 +189,7 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
     sceneLights.push_back(sceneLightToJson(light));
   }
 
-  return {
+  json value = {
       {"presentedOutput", static_cast<uint32_t>(settings.presentedOutput)},
       {"pbrDebugView", static_cast<uint32_t>(settings.pbrDebugView)},
       {"selectedMaterialIndex", settings.selectedMaterialIndex},
@@ -218,19 +219,6 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"skyboxVisible", settings.skyboxVisible},
       {"syncSkySunToLight", settings.syncSkySunToLight},
       {"iblBakeSettings", iblBakeSettingsToJson(settings.iblBakeSettings)},
-      {"modelPosition",
-       vec3ToJson(settings.sceneObjects.empty()
-                      ? glm::vec3(0.0f)
-                      : settings.sceneObjects.front().transform.position)},
-      {"modelRotationDegrees",
-       vec3ToJson(
-           settings.sceneObjects.empty()
-               ? glm::vec3(0.0f)
-               : settings.sceneObjects.front().transform.rotationDegrees)},
-      {"modelScale",
-       vec3ToJson(settings.sceneObjects.empty()
-                      ? glm::vec3(1.0f)
-                      : settings.sceneObjects.front().transform.scale)},
       {"cameraPosition", vec3ToJson(settings.cameraPosition)},
       {"cameraYawRadians", settings.cameraYawRadians},
       {"cameraPitchRadians", settings.cameraPitchRadians},
@@ -238,6 +226,17 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"cameraLookSensitivity", settings.cameraLookSensitivity},
       {"cameraFarPlane", settings.cameraFarPlane},
   };
+
+  if (!settings.sceneObjects.empty()) {
+    value["modelPosition"] =
+        vec3ToJson(settings.sceneObjects.front().transform.position);
+    value["modelRotationDegrees"] =
+        vec3ToJson(settings.sceneObjects.front().transform.rotationDegrees);
+    value["modelScale"] =
+        vec3ToJson(settings.sceneObjects.front().transform.scale);
+  }
+
+  return value;
 }
 
 inline DefaultDebugUISettings settingsFromJson(const json &value) {
@@ -254,12 +253,16 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       value.value("selectedLightIndex", settings.selectedLightIndex);
 
   settings.sceneObjects.clear();
-  if (value.contains("sceneObjects") && value["sceneObjects"].is_array()) {
+  const bool hasSceneObjectsArray =
+      value.contains("sceneObjects") && value["sceneObjects"].is_array();
+  if (hasSceneObjectsArray) {
     for (const auto &objectValue : value["sceneObjects"]) {
       settings.sceneObjects.push_back(sceneObjectFromJson(objectValue));
     }
   }
-  if (settings.sceneObjects.empty()) {
+  if (!hasSceneObjectsArray && settings.sceneObjects.empty() &&
+      (value.contains("modelPosition") || value.contains("modelRotationDegrees") ||
+       value.contains("modelScale"))) {
     SceneObject legacyObject;
     legacyObject.transform.position =
         vec3FromJson(value.value("modelPosition", json::array()),
@@ -271,15 +274,17 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
         value.value("modelScale", json::array()), legacyObject.transform.scale);
     settings.sceneObjects.push_back(std::move(legacyObject));
   }
-  ensureSceneObjects(settings);
+  clampSceneObjectSelection(settings);
 
   settings.sceneLights.clear();
-  if (value.contains("sceneLights") && value["sceneLights"].is_array()) {
+  const bool hasSceneLightsArray =
+      value.contains("sceneLights") && value["sceneLights"].is_array();
+  if (hasSceneLightsArray) {
     for (const auto &lightValue : value["sceneLights"]) {
       settings.sceneLights.lights().push_back(sceneLightFromJson(lightValue));
     }
   }
-  if (settings.sceneLights.empty()) {
+  if (!hasSceneLightsArray && settings.sceneLights.empty()) {
     settings.sceneLights = SceneLightSet::showcaseLights();
   }
 
