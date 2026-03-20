@@ -94,7 +94,8 @@ private:
   static std::string
   buildBakeCacheKey(const ImageBasedLightingBakeSettings &settings) {
     std::ostringstream key;
-    key << "envRes=" << settings.environmentResolution
+    key << "iblLayout=v2_y_up"
+        << ";envRes=" << settings.environmentResolution
         << ";irrRes=" << settings.irradianceResolution
         << ";prefRes=" << settings.prefilteredResolution
         << ";brdfRes=" << settings.brdfResolution
@@ -315,8 +316,8 @@ private:
     }
 
     const glm::vec3 dir = glm::normalize(direction);
-    const float phi = std::atan2(dir.y, dir.x);
-    const float theta = std::acos(glm::clamp(dir.z, -1.0f, 1.0f));
+    const float phi = std::atan2(dir.z, dir.x);
+    const float theta = std::acos(glm::clamp(dir.y, -1.0f, 1.0f));
     const float u = phi / (2.0f * std::numbers::pi_v<float>) + 0.5f;
     const float v = theta / std::numbers::pi_v<float>;
     return glm::vec3(sampleEquirectBilinear(source, u, v));

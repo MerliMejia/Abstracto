@@ -3,9 +3,11 @@
 #include "../passes/ShadowPass.h"
 #include "../renderable/RenderableModel.h"
 #include "../utils/DebugUIState.h"
+#include "SceneDefinition.h"
 #include <array>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <string_view>
 #include <vector>
 
 class AppSceneController {
@@ -52,10 +54,19 @@ public:
     }
 
     glm::vec3 anchor(0.0f);
+    uint32_t visibleObjectCount = 0;
     for (const auto &object : settings.sceneObjects) {
+      if (!object.visible) {
+        continue;
+      }
       anchor += object.transform.position;
+      ++visibleObjectCount;
     }
-    return anchor / static_cast<float>(settings.sceneObjects.size());
+
+    if (visibleObjectCount == 0) {
+      return glm::vec3(0.0f);
+    }
+    return anchor / static_cast<float>(visibleObjectCount);
   }
 
   static std::vector<glm::mat4>
@@ -112,6 +123,27 @@ public:
     settings.selectedLightIndex = -1;
   }
 
+  static void applyObjectOverrides(
+      DefaultDebugUISettings &settings,
+      const std::vector<SceneObjectOverride> &objectOverrides) {
+    for (const auto &objectOverride : objectOverrides) {
+      auto objectIt = std::find_if(
+          settings.sceneObjects.begin(), settings.sceneObjects.end(),
+          [&objectOverride](const SceneObject &object) {
+            return object.name == objectOverride.name;
+          });
+      if (objectIt == settings.sceneObjects.end()) {
+        continue;
+      }
+      if (objectOverride.overrideTransform) {
+        objectIt->transform = objectOverride.transform;
+      }
+      if (objectOverride.overrideVisibility) {
+        objectIt->visible = objectOverride.visible;
+      }
+    }
+  }
+
   template <size_t SpotShadowPassCount>
   static void rebuildRenderItems(
       std::vector<RenderItem> &renderItems, RenderableModel &sceneModel,
@@ -121,13 +153,16 @@ public:
       Mesh &fullscreenQuad, const RenderPass *pbrPass,
       const RenderPass *tonemapPass, const RenderPass *debugPresentPass) {
     const std::vector<glm::mat4> objectMatrices = sceneObjectMatrices(settings);
-    renderItems = sceneModel.buildRenderItems(geometryPass, objectMatrices);
+    renderItems.clear();
+
+    auto geometryItems =
+        sceneModel.buildRenderItems(geometryPass, objectMatrices);
+    appendVisibleItems(renderItems, geometryItems, settings);
 
     if (directionalShadowPass != nullptr) {
       auto shadowItems =
           sceneModel.buildRenderItems(directionalShadowPass, objectMatrices);
-      renderItems.insert(renderItems.end(), shadowItems.begin(),
-                         shadowItems.end());
+      appendVisibleItems(renderItems, shadowItems, settings);
     }
 
     for (ShadowPass *spotShadowPass : spotShadowPasses) {
@@ -136,8 +171,7 @@ public:
       }
       auto shadowItems =
           sceneModel.buildRenderItems(spotShadowPass, objectMatrices);
-      renderItems.insert(renderItems.end(), shadowItems.begin(),
-                         shadowItems.end());
+      appendVisibleItems(renderItems, shadowItems, settings);
     }
 
     if (pbrPass != nullptr) {
@@ -154,6 +188,24 @@ public:
       renderItems.push_back(RenderItem{.mesh = &fullscreenQuad,
                                        .descriptorBindings = nullptr,
                                        .targetPass = debugPresentPass});
+    }
+  }
+
+private:
+  static void appendVisibleItems(std::vector<RenderItem> &renderItems,
+                                 const std::vector<RenderItem> &sourceItems,
+                                 const DefaultDebugUISettings &settings) {
+    if (sourceItems.size() != settings.sceneObjects.size()) {
+      renderItems.insert(renderItems.end(), sourceItems.begin(),
+                         sourceItems.end());
+      return;
+    }
+
+    for (size_t index = 0; index < sourceItems.size(); ++index) {
+      if (!settings.sceneObjects[index].visible) {
+        continue;
+      }
+      renderItems.push_back(sourceItems[index]);
     }
   }
 };
