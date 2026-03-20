@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DefaultDebugUI.h"
+#include "DebugUIState.h"
 #include <filesystem>
 #include <fstream>
 #include <json.hpp>
@@ -63,9 +63,8 @@ inline SceneLight sceneLightFromJson(const json &value) {
   light.outerConeAngleRadians = std::max(
       value.value("outerConeAngleRadians", light.outerConeAngleRadians),
       light.innerConeAngleRadians);
-  const bool defaultCastsShadow =
-      light.type == SceneLightType::Directional ||
-      light.type == SceneLightType::Spot;
+  const bool defaultCastsShadow = light.type == SceneLightType::Directional ||
+                                  light.type == SceneLightType::Spot;
   light.castsShadow = value.value("castsShadow", defaultCastsShadow);
   light.shadowBias =
       std::max(value.value("shadowBias", light.shadowBias), 0.0f);
