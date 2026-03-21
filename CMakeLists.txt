@@ -113,10 +113,10 @@ endif()
 
 add_executable(
   Abstracto
-  src/main.cpp
-  src/renderable/GltfModelAsset.cpp
-  src/renderable/StbImageImplementation.cpp
-  src/renderable/TinyObjLoaderImplementation.cpp
+  apps/tree_scene/main.cpp
+  src/engine/assets/GltfModelAsset.cpp
+  src/engine/assets/StbImageImplementation.cpp
+  src/engine/assets/TinyObjLoaderImplementation.cpp
 )
 
 target_compile_definitions(
@@ -125,7 +125,7 @@ target_compile_definitions(
     VULKAN_HPP_NO_CONSTRUCTORS
 )
 
-set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/assets/shaders)
+set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/resources/shaders)
 file(GLOB ABSTRACTO_SLANG_SOURCES CONFIGURE_DEPENDS
   "${ABSTRACTO_SHADER_DIR}/*.slang"
 )
@@ -159,7 +159,7 @@ if(ABSTRACTO_SLANGC_EXECUTABLE AND ABSTRACTO_SLANG_OUTPUTS)
     add_custom_target(abstracto_shaders DEPENDS ${ABSTRACTO_SLANG_OUTPUTS})
     add_dependencies(Abstracto abstracto_shaders)
 else()
-    message(WARNING "slangc not found (or no Slang sources were found). Install slangc to auto-generate assets/shaders/*.spv.")
+    message(WARNING "slangc not found (or no Slang sources were found). Install slangc to auto-generate resources/shaders/*.spv.")
 endif()
 
 target_link_libraries(
@@ -174,6 +174,7 @@ target_link_libraries(
 target_include_directories(
   Abstracto
   PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/include
 )
 

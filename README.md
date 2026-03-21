@@ -27,7 +27,7 @@ The name comes from the Spanish word for "abstract." That is the point of the pr
 
 - Thin bootstrap path: get a window, Vulkan device, swapchain, command buffers, and frame sync without committing to a full engine.
 - Layered renderer API: move from `VulkanBackend` into `RenderPass`, `PassRenderer`, `SceneRenderPass`, `UniformSceneRenderPass`, and `FullscreenRenderPass`.
-- Real sample app in `src/main.cpp`: the current demo loads a night scene, renders one directional shadow map plus three spot shadow maps, then runs `GeometryPass -> PbrPass -> TonemapPass -> DebugPresentPass -> DebugOverlayPass -> ImGuiPass`.
+- Real sample app in `apps/tree_scene/main.cpp`: the current demo loads a night scene, renders one directional shadow map plus three spot shadow maps, then runs `GeometryPass -> PbrPass -> TonemapPass -> DebugPresentPass -> DebugOverlayPass -> ImGuiPass`.
 - Asset pipeline included: OBJ and glTF loading, textures, samplers, material bindings, HDR environment maps, procedural-sky IBL baking, and debug-session persistence.
 - Built to be studied: the wiki walks from a triangle on the swapchain to pass-owned uniforms and fullscreen source-pass sampling.
 
@@ -52,7 +52,7 @@ For the full breakdown, see the wiki page: [Current abstractions in the project]
 - A render setup that draws the scene into the G-buffer, computes fullscreen PBR lighting, tonemaps HDR output, presents selectable debug views, draws light markers, and overlays an ImGui UI.
 - Runtime scene lights with directional, point, and spot types, plus shadow casting for one directional light and up to three spot lights.
 - Material editing, camera movement, model transforms, tonemap controls, PBR debug views, output switching, performance stats, session save/reload, and IBL controls in the debug UI.
-- Slang shaders compiled to SPIR-V, with generated `.spv` files already checked into `assets/shaders`.
+- Slang shaders compiled to SPIR-V, with generated `.spv` files already checked into `resources/shaders`.
 
 ## Current Render Graph
 
@@ -110,11 +110,11 @@ If `slangc` is not installed, the current checked-in `.spv` files still let the 
 ## Pick Your Level
 
 - Want only a clean Vulkan bootstrap? Start with `AppWindow`, `BackendConfig`, and `VulkanBackend`.
-- Want direct control over the low-level setup? Work from the backend contexts in `src/backend`.
+- Want direct control over the low-level setup? Work from the backend contexts in `src/renderer/backend`.
 - Want to route meshes through reusable render stages? Build on `RenderPass`, `RenderItem`, and `PassRenderer`.
 - Want pass-owned uniform buffers and optional push constants? Extend `UniformSceneRenderPass<TUniform, TPush>`.
 - Want a post-process that samples another pass? Extend `FullscreenRenderPass`.
-- Want the most complete reference in this repo? Read `src/main.cpp` and follow the passes downward.
+- Want the most complete reference in this repo? Read `apps/tree_scene/main.cpp` and follow the passes downward.
 
 ## Learning Path
 
