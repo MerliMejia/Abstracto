@@ -1,0 +1,115 @@
+{
+  "autoExposureEnabled": true,
+  "autoExposureKey": 2.5,
+  "cameraFarPlane": 100.0,
+  "cameraLookSensitivity": 0.0035000001080334187,
+  "cameraMoveSpeed": 2.5,
+  "cameraPitchRadians": -0.10296327620744705,
+  "cameraPosition": [
+    3.578324556350708,
+    0.11889761686325073,
+    -2.64300537109375
+  ],
+  "cameraYawRadians": -2.5523242950439453,
+  "dielectricSpecularScale": 1.0,
+  "directionalShadowExtent": 12.0,
+  "directionalShadowFarPlane": 24.0,
+  "directionalShadowNearPlane": 0.10000000149011612,
+  "environmentBackgroundWeight": 1.0,
+  "environmentDiffuseWeight": 0.8500000238418579,
+  "environmentIntensity": 1.100000023841858,
+  "environmentRotationRadians": 0.0,
+  "environmentSpecularWeight": 1.350000023841858,
+  "exposure": 1.0,
+  "gamma": 1.684000015258789,
+  "iblBakeSettings": {
+    "brdfResolution": 256,
+    "brdfSamples": 128,
+    "environmentHdrPath": "assets/textures/nature_sky.hdr",
+    "environmentResolution": 1024,
+    "irradianceResolution": 32,
+    "irradianceSamples": 1024,
+    "prefilteredResolution": 256,
+    "prefilteredSamples": 64,
+    "sky": {
+      "groundColor": [
+        0.10000000149011612,
+        0.09000000357627869,
+        0.07999999821186066
+      ],
+      "groundFalloff": 1.600000023841858,
+      "horizonColor": [
+        0.8500000238418579,
+        0.7200000286102295,
+        0.5799999833106995
+      ],
+      "horizonGlow": 0.2800000011920929,
+      "skyExponent": 0.44999998807907104,
+      "sunAngularRadius": 0.04500000178813934,
+      "sunAzimuthRadians": 0.4266274869441986,
+      "sunColor": [
+        1.0,
+        0.949999988079071,
+        0.8199999928474426
+      ],
+      "sunElevationRadians": 1.0273293256759644,
+      "sunGlow": 2.5,
+      "sunIntensity": 24.0,
+      "zenithColor": [
+        0.1599999964237213,
+        0.3199999928474426,
+        0.7200000286102295
+      ]
+    }
+  },
+  "iblEnabled": true,
+  "lightMarkerScale": 0.3499999940395355,
+  "lightMarkersVisible": true,
+  "modelPosition": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelRotationDegrees": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelScale": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "pbrDebugView": 0,
+  "presentedOutput": 6,
+  "sceneLights": [],
+  "sceneObjects": [
+    {
+      "name": "Tree",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "visible": true
+    }
+  ],
+  "selectedLightIndex": -1,
+  "selectedMaterialIndex": 0,
+  "selectedObjectIndex": 0,
+  "shadowsEnabled": true,
+  "skyboxVisible": true,
+  "syncSkySunToLight": true,
+  "tonemapOperator": 2,
+  "whitePoint": 2.7160000801086426
+}
