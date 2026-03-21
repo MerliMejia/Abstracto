@@ -20,7 +20,8 @@ Abstracto is a Vulkan renderer that turns the API's moving parts into named, reu
 
 The name comes from the Spanish word for "abstract." That is the point of the project: learn Vulkan by breaking it into smaller systems that are easier to understand, reuse, and compose.
 
-![Current Abstracto render](assets/gallery/night_render.jpg)
+![Current Abstracto render](assets/gallery/tree_render.png)
+![Night Abstracto render](assets/gallery/night_render.jpg)
 ![First Abstracto render](assets/gallery/current_render.jpg)
 
 ## Why Abstracto?
