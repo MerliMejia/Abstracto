@@ -20,7 +20,7 @@ public:
 
   ~ImGuiPass() override { shutdown(); }
 
-  void beginFrame() {
+  void beginFrame(bool showDockspace = true) {
     if (!initialized) {
       return;
     }
@@ -28,8 +28,12 @@ public:
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-    mainDockspaceId = ImGui::DockSpaceOverViewport(
-        0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+    if (showDockspace) {
+      mainDockspaceId = ImGui::DockSpaceOverViewport(
+          0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+      return;
+    }
+    mainDockspaceId = 0;
   }
 
   void endFrame() {

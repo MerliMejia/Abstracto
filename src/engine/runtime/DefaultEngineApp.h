@@ -1,24 +1,32 @@
 #pragma once
 
+#include "AppPerformanceStats.h"
+#include "AppRendererSetup.h"
+#include "DefaultEngineConfig.h"
+#include "ShadowSystem.h"
+#include "engine/assets/RenderableModel.h"
+#include "engine/editor/DebugSessionIO.h"
+#include "engine/editor/DefaultDebugUI.h"
+#include "engine/scene/AppSceneController.h"
+#include "engine/scene/SceneDefinition.h"
 #include "renderer/backend/AppWindow.h"
 #include "renderer/backend/BackendConfig.h"
 #include "renderer/backend/VulkanBackend.h"
-#include "renderer/passes/ShadowPass.h"
-#include "renderer/debug/DebugLightMeshes.h"
-#include "renderer/resources/FrameGeometryUniforms.h"
-#include "engine/assets/RenderableModel.h"
-#include "renderer/resources/Sampler.h"
 #include "renderer/core/PassRenderer.h"
 #include "renderer/core/RenderPass.h"
-#include "engine/editor/DebugSessionIO.h"
-#include "engine/editor/DefaultDebugUI.h"
-#include "AppPerformanceStats.h"
-#include "AppRendererSetup.h"
-#include "engine/scene/AppSceneController.h"
-#include "DefaultEngineConfig.h"
-#include "engine/scene/SceneDefinition.h"
-#include "ShadowSystem.h"
+#include "renderer/debug/DebugLightMeshes.h"
+#include "renderer/passes/ShadowPass.h"
+#include "renderer/resources/FrameGeometryUniforms.h"
+#include "renderer/resources/Sampler.h"
 #include "vulkan/vulkan.hpp"
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#include <unistd.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <fstream>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -44,6 +52,7 @@ public:
 
   void run() {
     debugUiSettings = buildBaseDebugUiSettings();
+    debugUiVisible = !isDebuggerAttached();
     if (engineConfig.enableDebugSessionPersistence &&
         engineConfig.restoreSessionOnStartup) {
       loadDebugSessionFromDisk();
@@ -87,10 +96,48 @@ private:
       std::chrono::steady_clock::now();
   DefaultDebugUISettings debugUiSettings;
   float smoothedFrameTimeMs = 0.0f;
+  bool debugUiVisible = true;
+  bool debugUiToggleHeld = false;
 
   DeviceContext &deviceContext() { return backend.device(); }
   SwapchainContext &swapchainContext() { return backend.swapchain(); }
   CommandContext &commandContext() { return backend.commands(); }
+
+  static bool isDebuggerAttached() {
+#if defined(__APPLE__)
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+    kinfo_proc info{};
+    size_t size = sizeof(info);
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size != sizeof(info)) {
+      return false;
+    }
+    return (info.kp_proc.p_flag & P_TRACED) != 0;
+#elif defined(_WIN32)
+    return IsDebuggerPresent() != 0;
+#elif defined(__linux__)
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line)) {
+      if (line.rfind("TracerPid:", 0) != 0) {
+        continue;
+      }
+      const size_t valueStart = line.find_first_not_of(" \t", 10);
+      return valueStart != std::string::npos && line[valueStart] != '0';
+    }
+    return false;
+#else
+    return false;
+#endif
+  }
+
+  void updateDebugUiToggle() {
+    const bool togglePressed =
+        glfwGetKey(window.handle(), GLFW_KEY_GRAVE_ACCENT) == GLFW_PRESS;
+    if (togglePressed && !debugUiToggleHeld) {
+      debugUiVisible = !debugUiVisible;
+    }
+    debugUiToggleHeld = togglePressed;
+  }
 
   vk::raii::DescriptorSetLayout &sceneDescriptorSetLayout() {
     if (geometryPass == nullptr ||
@@ -220,7 +267,8 @@ private:
   }
 
   void syncSceneObjectsWithAssets() {
-    AppSceneController::syncSceneObjectsWithAssets(debugUiSettings, sceneAssets);
+    AppSceneController::syncSceneObjectsWithAssets(debugUiSettings,
+                                                   sceneAssets);
     AppSceneController::applyObjectOverrides(debugUiSettings,
                                              sceneDefinition.objectOverrides);
   }
@@ -296,8 +344,7 @@ private:
     AppRendererSetup::registerShadowPasses(
         renderer, directionalShadowPass, spotShadowPasses,
         DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT,
-        DEFAULT_ENGINE_SHADOW_MAP_RESOLUTION,
-        engineConfig.rendererAssetPath);
+        DEFAULT_ENGINE_SHADOW_MAP_RESOLUTION, engineConfig.rendererAssetPath);
 
     lightQuad = buildFullscreenQuadMesh();
     lightQuad.createVertexBuffer(commandContext(), deviceContext());
@@ -385,28 +432,33 @@ private:
     const float smoothedFps =
         smoothedFrameTimeMs > 0.0f ? 1000.0f / smoothedFrameTimeMs : 0.0f;
 
+    updateDebugUiToggle();
+
     if (imguiPass != nullptr) {
       const uint32_t activeShadowPasses = ShadowSystem::activeShadowPassCount(
           debugUiSettings, pbrPass, directionalShadowPass, spotShadowPasses);
-      RenderableModel &editorModel = currentEditorModel();
-      imguiPass->beginFrame();
-      DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
-          editorModel, debugUiSettings,
-          DefaultDebugUICallbacks{
-              .syncProceduralSkySunWithLight =
-                  [this]() { syncProceduralSkySunWithLight(); },
-              .currentPrimaryDirectionalLightWorld =
-                  [this]() { return currentPrimaryDirectionalLightWorld(); },
-          },
-          AppPerformanceStats::build(
-              smoothedFps, smoothedFrameTimeMs, debugUiSettings,
-              totalMaterialCount(), totalVertexCount(), totalTriangleCount(),
-              renderItems, geometryPass, pbrPass, tonemapPass, debugPresentPass,
-              activeShadowPasses),
-          imguiPass->dockspaceId());
-      const DefaultDebugUIResult uiResult = defaultDebugUi.build();
-      if (uiResult.materialChanged && editorModel.modelAsset() != nullptr) {
-        editorModel.syncMaterialParameters();
+      imguiPass->beginFrame(debugUiVisible);
+      DefaultDebugUIResult uiResult;
+      if (debugUiVisible) {
+        RenderableModel &editorModel = currentEditorModel();
+        DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
+            editorModel, debugUiSettings,
+            DefaultDebugUICallbacks{
+                .syncProceduralSkySunWithLight =
+                    [this]() { syncProceduralSkySunWithLight(); },
+                .currentPrimaryDirectionalLightWorld =
+                    [this]() { return currentPrimaryDirectionalLightWorld(); },
+            },
+            AppPerformanceStats::build(
+                smoothedFps, smoothedFrameTimeMs, debugUiSettings,
+                totalMaterialCount(), totalVertexCount(), totalTriangleCount(),
+                renderItems, geometryPass, pbrPass, tonemapPass,
+                debugPresentPass, activeShadowPasses),
+            imguiPass->dockspaceId());
+        uiResult = defaultDebugUi.build();
+        if (uiResult.materialChanged && editorModel.modelAsset() != nullptr) {
+          editorModel.syncMaterialParameters();
+        }
       }
       imguiPass->endFrame();
       if (uiResult.saveSessionRequested) {
