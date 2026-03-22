@@ -52,6 +52,9 @@ private:
     ImGui::SeparatorText("Debug Overlay");
     ImGui::Checkbox("Show Light Markers", &settings.lightMarkersVisible);
     ImGui::SliderFloat("Marker Scale", &settings.lightMarkerScale, 0.05f, 2.5f);
+    ImGui::Checkbox("Show Bones", &settings.bonesVisible);
+    ImGui::SliderFloat("Bone Marker Scale", &settings.boneMarkerScale, 0.01f,
+                       0.5f, "%.3f");
   }
 
   void buildTonemapUi() {

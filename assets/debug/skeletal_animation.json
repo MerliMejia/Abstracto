@@ -1,16 +1,18 @@
 {
   "autoExposureEnabled": true,
   "autoExposureKey": 2.5,
+  "boneMarkerScale": 0.04899999871850014,
+  "bonesVisible": true,
   "cameraFarPlane": 100.0,
   "cameraLookSensitivity": 0.0035000001080334187,
   "cameraMoveSpeed": 2.5,
-  "cameraPitchRadians": -0.23406249284744263,
+  "cameraPitchRadians": -0.29681646823883057,
   "cameraPosition": [
-    -1.4101642370224,
-    1.7617017030715942,
-    4.361055850982666
+    1.0959104299545288,
+    1.9975844621658325,
+    3.941030740737915
   ],
-  "cameraYawRadians": 0.32771775126457214,
+  "cameraYawRadians": -0.24751219153404236,
   "dielectricSpecularScale": 1.0,
   "directionalShadowExtent": 12.0,
   "directionalShadowFarPlane": 24.0,
@@ -134,8 +136,8 @@
       "visible": true
     }
   ],
-  "selectedBoneIndex": -1,
-  "selectedLightIndex": 0,
+  "selectedBoneIndex": 51,
+  "selectedLightIndex": -1,
   "selectedMaterialIndex": 0,
   "selectedObjectIndex": 0,
   "shadowsEnabled": true,

@@ -56,6 +56,8 @@ struct DefaultDebugUISettings {
   SceneLightSet sceneLights = SceneLightSet::showcaseLights();
   bool lightMarkersVisible = true;
   float lightMarkerScale = 0.35f;
+  bool bonesVisible = true;
+  float boneMarkerScale = 0.08f;
   bool shadowsEnabled = true;
   float directionalShadowExtent = 12.0f;
   float directionalShadowNearPlane = 0.1f;
