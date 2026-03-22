@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/animation/SkeletonPose.h"
 #include "renderer/core/RenderPass.h"
 #include "renderer/resources/FrameGeometryUniforms.h"
 #include "GltfModelAsset.h"
@@ -11,6 +12,7 @@
 #include <functional>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -138,6 +140,30 @@ public:
 
   const ModelAsset *modelAsset() const { return asset.get(); }
 
+  SkeletonPose *mutableSkeletonPose() {
+    return skeletonPose && asset != nullptr && asset->skeletonAsset() != nullptr
+               ? &*skeletonPose
+               : nullptr;
+  }
+
+  const SkeletonPose *currentSkeletonPose() const {
+    return skeletonPose && asset != nullptr && asset->skeletonAsset() != nullptr
+               ? &*skeletonPose
+               : nullptr;
+  }
+
+  void resetSkeletonPose() {
+    if (asset == nullptr || asset->skeletonAsset() == nullptr) {
+      skeletonPose.reset();
+      return;
+    }
+
+    if (!skeletonPose.has_value()) {
+      skeletonPose.emplace();
+    }
+    skeletonPose->resetToBindPose(*asset->skeletonAsset());
+  }
+
 private:
   template <typename TAsset>
   void loadAsset(const std::string &path, CommandContext &commandContext,
@@ -155,9 +181,17 @@ private:
     materialSet.create(deviceContext, commandContext, descriptorSetLayout,
                        frameGeometryUniforms, sampler, loadedAsset->materials(),
                        framesInFlight);
+    if (const SkeletonAssetData *loadedSkeleton = loadedAsset->skeletonAsset();
+        loadedSkeleton != nullptr && !loadedSkeleton->nodes.empty()) {
+      skeletonPose.emplace();
+      skeletonPose->initialize(*loadedSkeleton);
+    } else {
+      skeletonPose.reset();
+    }
     asset = std::move(loadedAsset);
   }
 
   std::unique_ptr<ModelAsset> asset;
   ModelMaterialSet materialSet;
+  std::optional<SkeletonPose> skeletonPose;
 };

@@ -438,7 +438,9 @@ private:
   void buildBoneInspector() {
     auto &settings = bindings.settings;
     const SkeletonAssetData *skeleton = currentSkeleton();
+    SkeletonPose *pose = bindings.sceneModel.mutableSkeletonPose();
     if (skeleton == nullptr || skeleton->nodes.empty() ||
+        pose == nullptr ||
         settings.selectedBoneIndex < 0 ||
         static_cast<size_t>(settings.selectedBoneIndex) >= skeleton->nodes.size()) {
       settings.selectedBoneIndex = -1;
@@ -490,6 +492,41 @@ private:
                 bone.localBindTransform.rotation.w);
     ImGui::Text("Scale: %.3f %.3f %.3f", bone.localBindTransform.scale.x,
                 bone.localBindTransform.scale.y, bone.localBindTransform.scale.z);
+
+    NodeTransform &poseTransform =
+        pose->localTransform(static_cast<size_t>(settings.selectedBoneIndex));
+    glm::vec3 poseRotationDegrees =
+        glm::degrees(glm::eulerAngles(poseTransform.rotation));
+    bool poseChanged = false;
+
+    ImGui::SeparatorText("Current Pose");
+    ImGui::Text("Translation: %.3f %.3f %.3f", poseTransform.translation.x,
+                poseTransform.translation.y, poseTransform.translation.z);
+    poseChanged |= ImGui::SliderFloat3("Local Rotation",
+                                       &poseRotationDegrees.x, -180.0f, 180.0f);
+    ImGui::Text("Scale: %.3f %.3f %.3f", poseTransform.scale.x,
+                poseTransform.scale.y, poseTransform.scale.z);
+
+    if (poseChanged) {
+      poseTransform.rotation =
+          glm::normalize(glm::quat(glm::radians(poseRotationDegrees)));
+      pose->recomputeWorldTransforms(*skeleton);
+    }
+
+    if (ImGui::Button("Reset Selected Bone")) {
+      poseTransform = bone.localBindTransform;
+      pose->recomputeWorldTransforms(*skeleton);
+    }
+    ImGui::SameLine(0.0f, 6.0f);
+    if (ImGui::Button("Reset Skeleton Pose")) {
+      bindings.sceneModel.resetSkeletonPose();
+    }
+
+    const glm::mat4 &worldTransform =
+        pose->worldTransform(static_cast<size_t>(settings.selectedBoneIndex));
+    ImGui::SeparatorText("World Pose");
+    ImGui::Text("Position: %.3f %.3f %.3f", worldTransform[3].x,
+                worldTransform[3].y, worldTransform[3].z);
 
     if (!bone.childIndices.empty()) {
       ImGui::SeparatorText("Children");
