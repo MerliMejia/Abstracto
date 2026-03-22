@@ -626,7 +626,7 @@ private:
       if (debugUiVisible) {
         RenderableModel &editorModel = currentEditorModel();
         DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
-            editorModel, debugUiSettings,
+            editorModel, sceneAssetModels, debugUiSettings,
             DefaultDebugUICallbacks{
                 .syncProceduralSkySunWithLight =
                     [this]() { syncProceduralSkySunWithLight(); },
@@ -676,6 +676,9 @@ private:
     DefaultDebugCameraController cameraController =
         DefaultDebugCameraController::create(debugUiSettings);
     cameraController.update(deltaSeconds, window.handle());
+    for (auto &sceneAssetModel : sceneAssetModels) {
+      sceneAssetModel.updateAnimationPlayback(deltaSeconds);
+    }
     rebuildSceneRenderItems();
     for (auto &sceneAssetModel : sceneAssetModels) {
       sceneAssetModel.updateSkinPalettes(frameState->frameIndex);

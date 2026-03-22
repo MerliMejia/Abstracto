@@ -319,6 +319,7 @@ private:
         ImGui::Text("Nodes: %zu", skeleton->nodes.size());
         ImGui::Text("Skins: %zu", skeleton->skins.size());
         ImGui::Text("Animations: %zu", skeleton->animations.size());
+
       }
     } else {
       ImGui::TextUnformatted("Asset: Scene Model");

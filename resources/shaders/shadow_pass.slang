@@ -12,7 +12,7 @@ struct ShadowPassData {
 struct ShadowObjectData {
     float4x4 model;
     int skinningEnabled;
-    float3 padding;
+    float4 padding;
 };
 
 struct SkinPaletteData {

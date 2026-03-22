@@ -196,6 +196,8 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"selectedObjectIndex", settings.selectedObjectIndex},
       {"selectedLightIndex", settings.selectedLightIndex},
       {"selectedBoneIndex", settings.selectedBoneIndex},
+      {"selectedAnimationObjectIndex", settings.selectedAnimationObjectIndex},
+      {"selectedAnimationIndex", settings.selectedAnimationIndex},
       {"sceneObjects", sceneObjects},
       {"sceneLights", sceneLights},
       {"lightMarkersVisible", settings.lightMarkersVisible},
@@ -257,6 +259,10 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       value.value("selectedLightIndex", settings.selectedLightIndex);
   settings.selectedBoneIndex =
       value.value("selectedBoneIndex", settings.selectedBoneIndex);
+  settings.selectedAnimationObjectIndex = value.value(
+      "selectedAnimationObjectIndex", settings.selectedAnimationObjectIndex);
+  settings.selectedAnimationIndex =
+      value.value("selectedAnimationIndex", settings.selectedAnimationIndex);
 
   settings.sceneObjects.clear();
   const bool hasSceneObjectsArray =

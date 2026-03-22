@@ -7,7 +7,7 @@
 struct ShadowPassPushConstant {
   glm::mat4 model{1.0f};
   int skinningEnabled = 0;
-  glm::vec3 padding{0.0f};
+  glm::vec4 padding{0.0f};
 };
 
 struct ShadowPassUniformData {

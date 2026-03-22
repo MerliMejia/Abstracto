@@ -50,6 +50,8 @@ struct DefaultDebugUISettings {
   int selectedObjectIndex = 0;
   int selectedLightIndex = -1;
   int selectedBoneIndex = -1;
+  int selectedAnimationObjectIndex = -1;
+  int selectedAnimationIndex = -1;
 
   std::vector<SceneObject> sceneObjects{SceneObject{}};
 
@@ -218,6 +220,7 @@ struct DefaultDebugUIPerformanceStats {
 
 struct DefaultDebugUIBindings {
   RenderableModel &sceneModel;
+  std::vector<RenderableModel> &sceneModels;
   DefaultDebugUISettings &settings;
   DefaultDebugUICallbacks callbacks;
   DefaultDebugUIPerformanceStats performanceStats;
