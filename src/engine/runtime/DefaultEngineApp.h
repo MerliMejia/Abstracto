@@ -150,6 +150,10 @@ private:
     return *geometryPass->descriptorSetLayout();
   }
 
+  vk::raii::DescriptorSetLayout *sceneSecondaryDescriptorSetLayout() {
+    return geometryPass == nullptr ? nullptr : geometryPass->descriptorSetLayout(1);
+  }
+
   std::filesystem::path debugSessionPath() const {
     return resolvedDebugSessionPath(engineConfig);
   }
@@ -457,7 +461,8 @@ private:
       }
       sceneAssetModels[index].loadFromFile(
           sceneAssets[index].assetPath, commandContext(), deviceContext(),
-          sceneDescriptorSetLayout(), frameGeometryUniforms, sampler,
+          sceneDescriptorSetLayout(), sceneSecondaryDescriptorSetLayout(),
+          frameGeometryUniforms, sampler,
           DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
       if (engineConfig.onSceneAssetLoaded != nullptr &&
           sceneAssetModels[index].modelAsset() != nullptr) {
@@ -672,6 +677,9 @@ private:
         DefaultDebugCameraController::create(debugUiSettings);
     cameraController.update(deltaSeconds, window.handle());
     rebuildSceneRenderItems();
+    for (auto &sceneAssetModel : sceneAssetModels) {
+      sceneAssetModel.updateSkinPalettes(frameState->frameIndex);
+    }
 
     GeometryUniformData geometryUniformData{};
     geometryUniformData.model = glm::mat4(1.0f);

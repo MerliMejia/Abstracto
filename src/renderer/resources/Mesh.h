@@ -543,7 +543,8 @@ struct GeometryVertex {
 
   bool operator==(const GeometryVertex &other) const {
     return pos == other.pos && normal == other.normal &&
-           texCoord == other.texCoord && jointIndices == other.jointIndices &&
+           texCoord == other.texCoord && tangent == other.tangent &&
+           jointIndices == other.jointIndices &&
            jointWeights == other.jointWeights;
   }
 };
@@ -554,6 +555,8 @@ template <> struct std::hash<GeometryVertex> {
     seed ^= hash<glm::vec3>()(vertex.normal) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);
     seed ^= hash<glm::vec2>()(vertex.texCoord) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::vec4>()(vertex.tangent) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);
     seed ^= hash<glm::uvec4>()(vertex.jointIndices) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);

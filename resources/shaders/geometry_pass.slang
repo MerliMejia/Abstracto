@@ -2,6 +2,7 @@ struct VSInput {
     [[vk::location(0)]] float3 position;
     [[vk::location(1)]] float3 normal;
     [[vk::location(2)]] float2 uv;
+    [[vk::location(3)]] float4 tangent;
     [[vk::location(4)]] uint4 jointIndices;
     [[vk::location(5)]] float4 jointWeights;
 };
@@ -26,7 +27,12 @@ struct GeometryObjectData {
     float4x4 modelNormal;
     int boneWeightJointIndex;
     int boneWeightDebugEnabled;
-    float2 debugPadding;
+    int skinningEnabled;
+    int debugPadding;
+};
+
+struct SkinPaletteData {
+    float4x4 joints[128];
 };
 
 struct MaterialData {
@@ -48,17 +54,35 @@ struct FSOutput {
 [[vk::binding(3, 0)]] Sampler2D emissiveTexture;
 [[vk::binding(4, 0)]] Sampler2D occlusionTexture;
 [[vk::binding(5, 0)]] ConstantBuffer<MaterialData> materialParams;
+[[vk::binding(0, 1)]] ConstantBuffer<SkinPaletteData> skinPalette;
 [[vk::push_constant]]
 ConstantBuffer<GeometryObjectData> objectData;
 
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput o;
-    float4 worldPos = mul(objectData.model, float4(input.position, 1.0));
+    float4 meshPosition = float4(input.position, 1.0);
+    float3 meshNormal = input.normal;
+    if (objectData.skinningEnabled != 0) {
+        meshPosition = 0.0;
+        meshNormal = 0.0;
+
+        meshPosition += mul(skinPalette.joints[input.jointIndices.x], float4(input.position, 1.0)) * input.jointWeights.x;
+        meshPosition += mul(skinPalette.joints[input.jointIndices.y], float4(input.position, 1.0)) * input.jointWeights.y;
+        meshPosition += mul(skinPalette.joints[input.jointIndices.z], float4(input.position, 1.0)) * input.jointWeights.z;
+        meshPosition += mul(skinPalette.joints[input.jointIndices.w], float4(input.position, 1.0)) * input.jointWeights.w;
+
+        meshNormal += mul((float3x3)skinPalette.joints[input.jointIndices.x], input.normal) * input.jointWeights.x;
+        meshNormal += mul((float3x3)skinPalette.joints[input.jointIndices.y], input.normal) * input.jointWeights.y;
+        meshNormal += mul((float3x3)skinPalette.joints[input.jointIndices.z], input.normal) * input.jointWeights.z;
+        meshNormal += mul((float3x3)skinPalette.joints[input.jointIndices.w], input.normal) * input.jointWeights.w;
+    }
+
+    float4 worldPos = mul(objectData.model, meshPosition);
     float4 viewPos = mul(ubo.view, worldPos);
     o.position = mul(ubo.proj, viewPos);
 
-    o.normalWS = normalize(mul((float3x3)objectData.modelNormal, input.normal));
+    o.normalWS = normalize(mul((float3x3)objectData.modelNormal, meshNormal));
     o.uv = input.uv;
     o.selectedJointWeight = 0.0;
     o.boneWeightDebugEnabled = objectData.boneWeightDebugEnabled;

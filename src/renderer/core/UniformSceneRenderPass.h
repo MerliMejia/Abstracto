@@ -118,6 +118,7 @@ private:
 
   void bindRenderItemResources(const RenderPassContext &context,
                                const RenderItem &renderItem) final {
+    this->bindSecondaryRenderItemResources(context, renderItem);
     bindPerRenderItemResources(context, renderItem);
   }
 };

@@ -3,6 +3,7 @@
 #include "engine/animation/SkeletonPose.h"
 #include "renderer/core/RenderPass.h"
 #include "renderer/resources/FrameGeometryUniforms.h"
+#include "renderer/resources/SkinPaletteBindings.h"
 #include "GltfModelAsset.h"
 #include "ModelAsset.h"
 #include "renderer/resources/ModelMaterialSet.h"
@@ -25,28 +26,33 @@ public:
   void loadFromObj(const std::string &path, CommandContext &commandContext,
                    DeviceContext &deviceContext,
                    const vk::raii::DescriptorSetLayout &descriptorSetLayout,
+                   const vk::raii::DescriptorSetLayout *secondaryDescriptorSetLayout,
                    FrameGeometryUniforms &frameGeometryUniforms,
                    Sampler &sampler, uint32_t framesInFlight,
                    MaterialOverrideFn materialOverride = nullptr) {
     loadAsset<ObjModelAsset>(path, commandContext, deviceContext,
-                             descriptorSetLayout, frameGeometryUniforms,
+                             descriptorSetLayout, secondaryDescriptorSetLayout,
+                             frameGeometryUniforms,
                              sampler, framesInFlight, materialOverride);
   }
 
   void loadFromGltf(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
+                    const vk::raii::DescriptorSetLayout *secondaryDescriptorSetLayout,
                     FrameGeometryUniforms &frameGeometryUniforms,
                     Sampler &sampler, uint32_t framesInFlight,
                     MaterialOverrideFn materialOverride = nullptr) {
     loadAsset<GltfModelAsset>(path, commandContext, deviceContext,
-                              descriptorSetLayout, frameGeometryUniforms,
+                              descriptorSetLayout, secondaryDescriptorSetLayout,
+                              frameGeometryUniforms,
                               sampler, framesInFlight, materialOverride);
   }
 
   void loadFromFile(const std::string &path, CommandContext &commandContext,
                     DeviceContext &deviceContext,
                     const vk::raii::DescriptorSetLayout &descriptorSetLayout,
+                    const vk::raii::DescriptorSetLayout *secondaryDescriptorSetLayout,
                     FrameGeometryUniforms &frameGeometryUniforms,
                     Sampler &sampler, uint32_t framesInFlight,
                     MaterialOverrideFn materialOverride = nullptr) {
@@ -54,14 +60,16 @@ public:
         std::filesystem::path(path).extension().string();
     if (extension == ".obj") {
       loadFromObj(path, commandContext, deviceContext, descriptorSetLayout,
-                  frameGeometryUniforms, sampler, framesInFlight,
+                  secondaryDescriptorSetLayout, frameGeometryUniforms, sampler,
+                  framesInFlight,
                   materialOverride);
       return;
     }
 
     if (extension == ".gltf" || extension == ".glb") {
       loadFromGltf(path, commandContext, deviceContext, descriptorSetLayout,
-                   frameGeometryUniforms, sampler, framesInFlight,
+                   secondaryDescriptorSetLayout, frameGeometryUniforms, sampler,
+                   framesInFlight,
                    materialOverride);
       return;
     }
@@ -88,11 +96,13 @@ public:
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
           .descriptorBindings = &materialSet.bindingsForMaterialIndex(-1),
+          .secondaryDescriptorBindings = nullptr,
           .targetPass = targetPass,
           .modelMatrix = modelMatrix,
           .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
           .boneWeightJointIndex = -1,
           .boneWeightDebugEnabled = 0,
+          .skinningEnabled = 0,
       });
       return items;
     }
@@ -128,6 +138,11 @@ public:
           .mesh = &asset->mesh(),
           .descriptorBindings =
               &materialSet.bindingsForMaterialIndex(submesh.materialIndex),
+          .secondaryDescriptorBindings =
+              index < skinPaletteBindings.size() &&
+                      skinPaletteBindings[index].valid
+                  ? &skinPaletteBindings[index].bindings
+                  : nullptr,
           .targetPass = targetPass,
           .indexOffset = submesh.indexOffset,
           .indexCount = submesh.indexCount,
@@ -135,6 +150,11 @@ public:
           .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
           .boneWeightJointIndex = selectedJointIndex,
           .boneWeightDebugEnabled = selectedBoneNodeIndex >= 0 ? 1 : 0,
+          .skinningEnabled =
+              index < skinPaletteBindings.size() &&
+                      skinPaletteBindings[index].valid
+                  ? 1
+                  : 0,
       });
     }
 
@@ -188,11 +208,76 @@ public:
     skeletonPose->resetToBindPose(*asset->skeletonAsset());
   }
 
+  void updateSkinPalettes(uint32_t frameIndex) {
+    if (asset == nullptr || asset->skeletonAsset() == nullptr ||
+        !skeletonPose.has_value()) {
+      return;
+    }
+
+    const SkeletonAssetData &skeleton = *asset->skeletonAsset();
+    const auto &submeshes = asset->submeshes();
+    for (size_t submeshIndex = 0; submeshIndex < submeshes.size();
+         ++submeshIndex) {
+      if (submeshIndex >= skinPaletteBindings.size() ||
+          !skinPaletteBindings[submeshIndex].valid) {
+        continue;
+      }
+
+      const auto &submesh = submeshes[submeshIndex];
+      if (submesh.skinIndex < 0 ||
+          static_cast<size_t>(submesh.skinIndex) >= skeleton.skins.size()) {
+        continue;
+      }
+
+      const SkinData &skin =
+          skeleton.skins[static_cast<size_t>(submesh.skinIndex)];
+      if (skin.jointNodeIndices.size() > MAX_SKIN_JOINTS) {
+        throw std::runtime_error("skin joint count exceeds MAX_SKIN_JOINTS");
+      }
+
+      SkinPaletteUniformData palette{};
+      for (auto &jointMatrix : palette.joints) {
+        jointMatrix = glm::mat4(1.0f);
+      }
+
+      glm::mat4 meshNodeWorld = submesh.transform;
+      if (submesh.nodeIndex >= 0 &&
+          static_cast<size_t>(submesh.nodeIndex) < skeleton.nodes.size()) {
+        meshNodeWorld =
+            skeletonPose->worldTransform(static_cast<size_t>(submesh.nodeIndex));
+      }
+      const glm::mat4 inverseMeshNodeWorld = glm::inverse(meshNodeWorld);
+
+      for (size_t jointIndex = 0; jointIndex < skin.jointNodeIndices.size();
+           ++jointIndex) {
+        const int jointNodeIndex = skin.jointNodeIndices[jointIndex];
+        if (jointNodeIndex < 0 ||
+            static_cast<size_t>(jointNodeIndex) >= skeleton.nodes.size()) {
+          continue;
+        }
+
+        const glm::mat4 jointWorld =
+            skeletonPose->worldTransform(static_cast<size_t>(jointNodeIndex));
+        palette.joints[jointIndex] =
+            inverseMeshNodeWorld * jointWorld *
+            skin.inverseBindMatrices[jointIndex];
+      }
+
+      skinPaletteBindings[submeshIndex].bindings.write(frameIndex, palette);
+    }
+  }
+
 private:
+  struct SubmeshSkinPaletteResource {
+    SkinPaletteBindings bindings;
+    bool valid = false;
+  };
+
   template <typename TAsset>
   void loadAsset(const std::string &path, CommandContext &commandContext,
                  DeviceContext &deviceContext,
                  const vk::raii::DescriptorSetLayout &descriptorSetLayout,
+                 const vk::raii::DescriptorSetLayout *secondaryDescriptorSetLayout,
                  FrameGeometryUniforms &frameGeometryUniforms, Sampler &sampler,
                  uint32_t framesInFlight,
                  const MaterialOverrideFn &materialOverride = nullptr) {
@@ -209,8 +294,22 @@ private:
         loadedSkeleton != nullptr && !loadedSkeleton->nodes.empty()) {
       skeletonPose.emplace();
       skeletonPose->initialize(*loadedSkeleton);
+      skinPaletteBindings.clear();
+      skinPaletteBindings.resize(loadedAsset->submeshes().size());
+      if (secondaryDescriptorSetLayout != nullptr) {
+        for (size_t submeshIndex = 0;
+             submeshIndex < loadedAsset->submeshes().size(); ++submeshIndex) {
+          if (loadedAsset->submeshes()[submeshIndex].skinIndex < 0) {
+            continue;
+          }
+          skinPaletteBindings[submeshIndex].bindings.create(
+              deviceContext, *secondaryDescriptorSetLayout, framesInFlight);
+          skinPaletteBindings[submeshIndex].valid = true;
+        }
+      }
     } else {
       skeletonPose.reset();
+      skinPaletteBindings.clear();
     }
     asset = std::move(loadedAsset);
   }
@@ -218,4 +317,5 @@ private:
   std::unique_ptr<ModelAsset> asset;
   ModelMaterialSet materialSet;
   std::optional<SkeletonPose> skeletonPose;
+  std::vector<SubmeshSkinPaletteResource> skinPaletteBindings;
 };

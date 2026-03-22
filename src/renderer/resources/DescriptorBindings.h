@@ -14,13 +14,19 @@
 import vulkan_hpp;
 #endif
 
+class FrameDescriptorBindings {
+public:
+  virtual ~FrameDescriptorBindings() = default;
+  virtual vk::raii::DescriptorSet &descriptorSet(uint32_t frameIndex) = 0;
+};
+
 struct MaterialUniformData {
   alignas(16) glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
   alignas(16) glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};
   alignas(16) glm::vec4 surfaceParams{0.0f, 1.0f, 1.0f, 1.0f};
 };
 
-class DescriptorBindings {
+class DescriptorBindings : public FrameDescriptorBindings {
 public:
   void create(DeviceContext &deviceContext,
               const vk::raii::DescriptorSetLayout &descriptorSetLayout,
@@ -136,7 +142,7 @@ public:
                 sizeof(MaterialUniformData));
   }
 
-  vk::raii::DescriptorSet &descriptorSet(uint32_t frameIndex) {
+  vk::raii::DescriptorSet &descriptorSet(uint32_t frameIndex) override {
     return descriptorSets[frameIndex];
   }
 

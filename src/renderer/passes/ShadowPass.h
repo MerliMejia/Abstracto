@@ -6,6 +6,8 @@
 
 struct ShadowPassPushConstant {
   glm::mat4 model{1.0f};
+  int skinningEnabled = 0;
+  glm::vec3 padding{0.0f};
 };
 
 struct ShadowPassUniformData {
@@ -62,11 +64,29 @@ protected:
     return vk::ShaderStageFlagBits::eVertex;
   }
 
+  std::vector<DescriptorBindingSpec> secondaryDescriptorBindings() const override {
+    return {{
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+    }};
+  }
+
   VertexInputLayoutSpec vertexInputLayout() const override {
     return VertexInputLayoutSpec{
         .bindings = {GeometryVertex::getBindingDescription()},
-        .attributes = {vk::VertexInputAttributeDescription(
-            0, 0, vk::Format::eR32G32B32Sfloat, offsetof(GeometryVertex, pos))},
+        .attributes = {
+            vk::VertexInputAttributeDescription(
+                0, 0, vk::Format::eR32G32B32Sfloat,
+                offsetof(GeometryVertex, pos)),
+            vk::VertexInputAttributeDescription(
+                4, 0, vk::Format::eR32G32B32A32Uint,
+                offsetof(GeometryVertex, jointIndices)),
+            vk::VertexInputAttributeDescription(
+                5, 0, vk::Format::eR32G32B32A32Sfloat,
+                offsetof(GeometryVertex, jointWeights)),
+        },
     };
   }
 
@@ -102,7 +122,10 @@ protected:
 
   void bindPerRenderItemResources(const RenderPassContext &context,
                                   const RenderItem &renderItem) override {
-    ShadowPassPushConstant push{.model = renderItem.modelMatrix};
+    ShadowPassPushConstant push{
+        .model = renderItem.modelMatrix,
+        .skinningEnabled = renderItem.skinningEnabled,
+    };
     context.commandBuffer.pushConstants<ShadowPassPushConstant>(
         *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});
   }

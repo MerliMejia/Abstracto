@@ -2,28 +2,28 @@
   "autoExposureEnabled": true,
   "autoExposureKey": 2.5,
   "boneMarkerScale": 0.04899999871850014,
-  "bonesVisible": true,
+  "bonesVisible": false,
   "cameraFarPlane": 100.0,
   "cameraLookSensitivity": 0.0035000001080334187,
   "cameraMoveSpeed": 2.5,
-  "cameraPitchRadians": -0.5137481689453125,
+  "cameraPitchRadians": -0.12345694750547409,
   "cameraPosition": [
-    2.640413522720337,
-    2.700374126434326,
-    2.0962657928466797
+    1.988863229751587,
+    0.8826460838317871,
+    2.333873748779297
   ],
-  "cameraYawRadians": -0.9560728073120117,
-  "dielectricSpecularScale": 1.0,
+  "cameraYawRadians": -0.6277849674224854,
+  "dielectricSpecularScale": 1.3539999723434448,
   "directionalShadowExtent": 12.0,
   "directionalShadowFarPlane": 24.0,
   "directionalShadowNearPlane": 0.10000000149011612,
-  "environmentBackgroundWeight": 1.0779999494552612,
-  "environmentDiffuseWeight": 1.2400000095367432,
-  "environmentIntensity": 1.1979999542236328,
-  "environmentRotationRadians": 0.0,
-  "environmentSpecularWeight": 1.350000023841858,
+  "environmentBackgroundWeight": 1.9170000553131104,
+  "environmentDiffuseWeight": 0.8500000238418579,
+  "environmentIntensity": 1.8420000076293945,
+  "environmentRotationRadians": 0.8028514385223389,
+  "environmentSpecularWeight": 2.4230000972747803,
   "exposure": 0.42899999022483826,
-  "gamma": 1.7130000591278076,
+  "gamma": 2.122999906539917,
   "iblBakeSettings": {
     "brdfResolution": 256,
     "brdfSamples": 128,
@@ -64,9 +64,9 @@
       ]
     }
   },
-  "iblEnabled": false,
+  "iblEnabled": true,
   "lightMarkerScale": 0.3499999940395355,
-  "lightMarkersVisible": true,
+  "lightMarkersVisible": false,
   "modelPosition": [
     0.0,
     0.0,
@@ -83,7 +83,7 @@
     1.0
   ],
   "pbrDebugView": 0,
-  "presentedOutput": 0,
+  "presentedOutput": 7,
   "sceneLights": [
     {
       "castsShadow": true,
@@ -98,7 +98,7 @@
         -0.8656848669052124
       ],
       "enabled": true,
-      "exposure": 9.053999900817871,
+      "exposure": 8.27400016784668,
       "innerConeAngleRadians": 0.3141592741012573,
       "name": "Directional Light",
       "outerConeAngleRadians": 0.48869219422340393,
@@ -136,14 +136,14 @@
       "visible": true
     }
   ],
-  "selectedBoneIndex": 26,
-  "selectedLightIndex": -1,
+  "selectedBoneIndex": -1,
+  "selectedLightIndex": 0,
   "selectedMaterialIndex": 0,
   "selectedObjectIndex": 0,
   "shadowsEnabled": true,
-  "showBoneWeights": true,
-  "skyboxVisible": false,
+  "showBoneWeights": false,
+  "skyboxVisible": true,
   "syncSkySunToLight": true,
   "tonemapOperator": 2,
-  "whitePoint": 4.756999969482422
+  "whitePoint": 2.3369998931884766
 }
