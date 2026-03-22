@@ -152,6 +152,12 @@ private:
     return resolvedDebugSessionPath(engineConfig);
   }
 
+  void applyEngineConfigOverrides(DefaultDebugUISettings &settings) const {
+    if (engineConfig.skyboxVisible.has_value()) {
+      settings.skyboxVisible = *engineConfig.skyboxVisible;
+    }
+  }
+
   std::vector<SceneAssetInstance> resolvedSceneAssets() const {
     if (!sceneDefinition.assets.empty()) {
       return sceneDefinition.assets;
@@ -242,6 +248,7 @@ private:
     if (sceneDefinition.configureSettings) {
       sceneDefinition.configureSettings(settings);
     }
+    applyEngineConfigOverrides(settings);
     clampSceneObjectSelection(settings);
     return settings;
   }
@@ -294,6 +301,11 @@ private:
           sceneAssets[index].assetPath, commandContext(), deviceContext(),
           sceneDescriptorSetLayout(), frameGeometryUniforms, sampler,
           DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
+      if (engineConfig.onSceneAssetLoaded != nullptr &&
+          sceneAssetModels[index].modelAsset() != nullptr) {
+        engineConfig.onSceneAssetLoaded(
+            sceneAssets[index], *sceneAssetModels[index].modelAsset());
+      }
     }
     syncSceneObjectsWithAssets();
     rebuildSceneRenderItems();
@@ -306,6 +318,7 @@ private:
 
     try {
       DebugSessionIO::loadDebugSession(debugSessionPath(), debugUiSettings);
+      applyEngineConfigOverrides(debugUiSettings);
       ensureDefaultEnvironmentPath();
     } catch (const std::exception &e) {
       std::cerr << "Failed to load debug session: " << e.what() << std::endl;

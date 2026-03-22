@@ -1,0 +1,145 @@
+{
+  "autoExposureEnabled": true,
+  "autoExposureKey": 2.5,
+  "cameraFarPlane": 100.0,
+  "cameraLookSensitivity": 0.0035000001080334187,
+  "cameraMoveSpeed": 2.5,
+  "cameraPitchRadians": -0.27689653635025024,
+  "cameraPosition": [
+    -1.4101642370224,
+    1.7617017030715942,
+    4.361055850982666
+  ],
+  "cameraYawRadians": 0.26434850692749023,
+  "dielectricSpecularScale": 1.0,
+  "directionalShadowExtent": 12.0,
+  "directionalShadowFarPlane": 24.0,
+  "directionalShadowNearPlane": 0.10000000149011612,
+  "environmentBackgroundWeight": 1.0779999494552612,
+  "environmentDiffuseWeight": 1.2400000095367432,
+  "environmentIntensity": 1.1979999542236328,
+  "environmentRotationRadians": 0.0,
+  "environmentSpecularWeight": 1.350000023841858,
+  "exposure": 0.42899999022483826,
+  "gamma": 1.7130000591278076,
+  "iblBakeSettings": {
+    "brdfResolution": 256,
+    "brdfSamples": 128,
+    "environmentHdrPath": "assets/textures/nature_sky.hdr",
+    "environmentResolution": 1024,
+    "irradianceResolution": 32,
+    "irradianceSamples": 1024,
+    "prefilteredResolution": 256,
+    "prefilteredSamples": 64,
+    "sky": {
+      "groundColor": [
+        0.10000000149011612,
+        0.09000000357627869,
+        0.07999999821186066
+      ],
+      "groundFalloff": 1.600000023841858,
+      "horizonColor": [
+        0.8500000238418579,
+        0.7200000286102295,
+        0.5799999833106995
+      ],
+      "horizonGlow": 0.2800000011920929,
+      "skyExponent": 0.44999998807907104,
+      "sunAngularRadius": 0.04500000178813934,
+      "sunAzimuthRadians": 0.6435011029243469,
+      "sunColor": [
+        1.0,
+        0.949999988079071,
+        0.8199999928474426
+      ],
+      "sunElevationRadians": 1.1071486473083496,
+      "sunGlow": 2.5,
+      "sunIntensity": 24.0,
+      "zenithColor": [
+        0.1599999964237213,
+        0.3199999928474426,
+        0.7200000286102295
+      ]
+    }
+  },
+  "iblEnabled": false,
+  "lightMarkerScale": 0.3499999940395355,
+  "lightMarkersVisible": true,
+  "modelPosition": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelRotationDegrees": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "modelScale": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "pbrDebugView": 0,
+  "presentedOutput": 7,
+  "sceneLights": [
+    {
+      "castsShadow": true,
+      "color": [
+        1.0,
+        0.949999988079071,
+        0.8999999761581421
+      ],
+      "direction": [
+        0.43789732456207275,
+        -0.24256056547164917,
+        -0.8656848669052124
+      ],
+      "enabled": true,
+      "exposure": 9.053999900817871,
+      "innerConeAngleRadians": 0.3141592741012573,
+      "name": "Directional Light",
+      "outerConeAngleRadians": 0.48869219422340393,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "power": 21.799999237060547,
+      "radius": 0.25,
+      "range": 8.0,
+      "shadowBias": 0.001500000013038516,
+      "shadowNormalBias": 0.019999999552965164,
+      "type": 0
+    }
+  ],
+  "sceneObjects": [
+    {
+      "name": "Robot",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationDegrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "visible": true
+    }
+  ],
+  "selectedLightIndex": 0,
+  "selectedMaterialIndex": 0,
+  "selectedObjectIndex": 0,
+  "shadowsEnabled": true,
+  "skyboxVisible": false,
+  "syncSkySunToLight": true,
+  "tonemapOperator": 2,
+  "whitePoint": 4.756999969482422
+}

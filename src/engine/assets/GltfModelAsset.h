@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ModelAsset.h"
+#include "engine/assets/SkeletonTypes.h"
 
 class GltfModelAsset : public ModelAsset {
 public:
@@ -29,7 +30,15 @@ public:
 
   const std::string &path() const override { return sourcePath; }
 
+  const SkeletonAssetData *skeletonAsset() const override {
+    return skeletonData.nodes.empty() && skeletonData.skins.empty() &&
+                   skeletonData.animations.empty()
+               ? nullptr
+               : &skeletonData;
+  }
+
 private:
   std::string sourcePath;
   ImportedGeometryMesh geometryMesh;
+  SkeletonAssetData skeletonData;
 };
