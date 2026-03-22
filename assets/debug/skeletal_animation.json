@@ -4,13 +4,13 @@
   "cameraFarPlane": 100.0,
   "cameraLookSensitivity": 0.0035000001080334187,
   "cameraMoveSpeed": 2.5,
-  "cameraPitchRadians": -0.27689653635025024,
+  "cameraPitchRadians": -0.23406249284744263,
   "cameraPosition": [
     -1.4101642370224,
     1.7617017030715942,
     4.361055850982666
   ],
-  "cameraYawRadians": 0.26434850692749023,
+  "cameraYawRadians": 0.32771775126457214,
   "dielectricSpecularScale": 1.0,
   "directionalShadowExtent": 12.0,
   "directionalShadowFarPlane": 24.0,
@@ -46,13 +46,13 @@
       "horizonGlow": 0.2800000011920929,
       "skyExponent": 0.44999998807907104,
       "sunAngularRadius": 0.04500000178813934,
-      "sunAzimuthRadians": 0.6435011029243469,
+      "sunAzimuthRadians": 2.635744094848633,
       "sunColor": [
         1.0,
         0.949999988079071,
         0.8199999928474426
       ],
-      "sunElevationRadians": 1.1071486473083496,
+      "sunElevationRadians": 1.0465168952941895,
       "sunGlow": 2.5,
       "sunIntensity": 24.0,
       "zenithColor": [
@@ -134,6 +134,7 @@
       "visible": true
     }
   ],
+  "selectedBoneIndex": -1,
   "selectedLightIndex": 0,
   "selectedMaterialIndex": 0,
   "selectedObjectIndex": 0,

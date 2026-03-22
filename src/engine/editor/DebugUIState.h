@@ -49,6 +49,7 @@ struct DefaultDebugUISettings {
   int selectedMaterialIndex = 0;
   int selectedObjectIndex = 0;
   int selectedLightIndex = -1;
+  int selectedBoneIndex = -1;
 
   std::vector<SceneObject> sceneObjects{SceneObject{}};
 

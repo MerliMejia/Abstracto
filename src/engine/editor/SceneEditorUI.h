@@ -3,6 +3,7 @@
 #include "DebugUIState.h"
 #include <algorithm>
 #include <filesystem>
+#include <unordered_set>
 #include <string>
 #include <utility>
 
@@ -19,10 +20,52 @@ public:
 private:
   DefaultDebugUIBindings bindings;
 
+  const SkeletonAssetData *currentSkeleton() const {
+    const ModelAsset *asset = bindings.sceneModel.modelAsset();
+    return asset == nullptr ? nullptr : asset->skeletonAsset();
+  }
+
+  std::unordered_set<int> currentDeformingBoneSet() const {
+    std::unordered_set<int> deformingBones;
+    const ModelAsset *asset = bindings.sceneModel.modelAsset();
+    const SkeletonAssetData *skeleton = currentSkeleton();
+    if (asset == nullptr || skeleton == nullptr) {
+      return deformingBones;
+    }
+
+    for (const auto &submesh : asset->submeshes()) {
+      if (submesh.skinIndex < 0 ||
+          static_cast<size_t>(submesh.skinIndex) >= skeleton->skins.size()) {
+        continue;
+      }
+
+      const SkinData &skin =
+          skeleton->skins[static_cast<size_t>(submesh.skinIndex)];
+      for (const int jointNodeIndex : skin.jointNodeIndices) {
+        deformingBones.insert(jointNodeIndex);
+      }
+    }
+
+    return deformingBones;
+  }
+
+  void clampBoneSelection(DefaultDebugUISettings &settings) const {
+    const SkeletonAssetData *skeleton = currentSkeleton();
+    if (skeleton == nullptr || skeleton->nodes.empty()) {
+      settings.selectedBoneIndex = -1;
+      return;
+    }
+
+    settings.selectedBoneIndex =
+        std::clamp(settings.selectedBoneIndex, -1,
+                   static_cast<int>(skeleton->nodes.size()) - 1);
+  }
+
   void selectObject(int index) {
     auto &settings = bindings.settings;
     settings.selectedObjectIndex = index;
     settings.selectedLightIndex = -1;
+    settings.selectedBoneIndex = -1;
 
     if (bindings.sceneModel.modelAsset() == nullptr) {
       return;
@@ -30,6 +73,12 @@ private:
     if (!bindings.sceneModel.materials().empty()) {
       settings.selectedMaterialIndex = 0;
     }
+  }
+
+  void selectBone(int index) {
+    auto &settings = bindings.settings;
+    settings.selectedLightIndex = -1;
+    settings.selectedBoneIndex = index;
   }
 
   static const char *lightTypeLabel(SceneLightType type) {
@@ -66,7 +115,7 @@ private:
   void buildHierarchyPanel() {
     auto &settings = bindings.settings;
     clampSceneObjectSelection(settings);
-    const ModelAsset *asset = bindings.sceneModel.modelAsset();
+    clampBoneSelection(settings);
     const auto &lights = settings.sceneLights.lights();
 
     ImGui::Begin("Hierarchy");
@@ -74,22 +123,26 @@ private:
       settings.sceneLights.addDirectional();
       settings.selectedLightIndex =
           static_cast<int>(settings.sceneLights.size()) - 1;
+      settings.selectedBoneIndex = -1;
     }
     ImGui::SameLine();
     if (ImGui::Button("+ Point")) {
       settings.sceneLights.addPoint();
       settings.selectedLightIndex =
           static_cast<int>(settings.sceneLights.size()) - 1;
+      settings.selectedBoneIndex = -1;
     }
     ImGui::SameLine();
     if (ImGui::Button("+ Spot")) {
       settings.sceneLights.addSpot();
       settings.selectedLightIndex =
           static_cast<int>(settings.sceneLights.size()) - 1;
+      settings.selectedBoneIndex = -1;
     }
     if (ImGui::Button("Reset Lights")) {
       settings.sceneLights = SceneLightSet::showcaseLights();
       settings.selectedLightIndex = settings.sceneLights.empty() ? -1 : 0;
+      settings.selectedBoneIndex = -1;
     }
 
     ImGui::SeparatorText("Objects");
@@ -98,16 +151,7 @@ private:
     } else {
       for (int index = 0; index < static_cast<int>(settings.sceneObjects.size());
            ++index) {
-        const SceneObject &object =
-            settings.sceneObjects[static_cast<size_t>(index)];
-        std::string label = object.name.empty()
-                                ? "Scene Object " + std::to_string(index)
-                                : object.name;
-        const bool selected = settings.selectedLightIndex < 0 &&
-                              settings.selectedObjectIndex == index;
-        if (ImGui::Selectable(label.c_str(), selected)) {
-          selectObject(index);
-        }
+        buildObjectHierarchyNode(index);
       }
     }
 
@@ -122,6 +166,7 @@ private:
         if (ImGui::Selectable(label.c_str(),
                               settings.selectedLightIndex == index)) {
           settings.selectedLightIndex = index;
+          settings.selectedBoneIndex = -1;
         }
       }
     }
@@ -131,20 +176,61 @@ private:
   bool buildInspectorPanel() {
     auto &settings = bindings.settings;
     clampSceneObjectSelection(settings);
+    clampBoneSelection(settings);
 
     ImGui::Begin("Inspector");
-    const bool objectSelected =
-        settings.selectedLightIndex < 0 && !settings.sceneObjects.empty();
     bool materialChanged = false;
-    if (objectSelected) {
-      materialChanged = buildObjectInspector();
-    } else if (settings.selectedLightIndex >= 0) {
+    if (settings.selectedLightIndex >= 0) {
       buildLightInspector();
+    } else if (settings.selectedBoneIndex >= 0) {
+      buildBoneInspector();
+    } else if (!settings.sceneObjects.empty()) {
+      materialChanged = buildObjectInspector();
     } else {
       ImGui::TextUnformatted("Nothing selected.");
     }
     ImGui::End();
     return materialChanged;
+  }
+
+  void buildObjectHierarchyNode(int index) {
+    auto &settings = bindings.settings;
+    const SceneObject &object = settings.sceneObjects[static_cast<size_t>(index)];
+    const bool isSelectedObject =
+        settings.selectedLightIndex < 0 && settings.selectedObjectIndex == index;
+    const bool showSkeletonChild =
+        isSelectedObject && currentSkeleton() != nullptr &&
+        !currentSkeleton()->nodes.empty();
+
+    const std::string label =
+        (object.name.empty() ? "Scene Object " + std::to_string(index)
+                             : object.name) +
+        "##scene_object_" + std::to_string(index);
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                               ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (!showSkeletonChild) {
+      flags |= ImGuiTreeNodeFlags_Leaf;
+    }
+    if (isSelectedObject && settings.selectedBoneIndex < 0) {
+      flags |= ImGuiTreeNodeFlags_Selected;
+    }
+    if (isSelectedObject) {
+      flags |= ImGuiTreeNodeFlags_DefaultOpen;
+    }
+
+    const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+    if (ImGui::IsItemClicked()) {
+      selectObject(index);
+    }
+
+    if (open) {
+      if (showSkeletonChild) {
+        buildSkeletonHierarchyNode();
+      }
+      ImGui::TreePop();
+    }
   }
 
   bool buildObjectInspector() {
@@ -165,6 +251,12 @@ private:
                   std::filesystem::path(assetPath).filename().string().c_str());
       if (!assetPath.empty()) {
         ImGui::TextWrapped("Source: %s", assetPath.c_str());
+      }
+      if (const auto *skeleton = asset->skeletonAsset(); skeleton != nullptr) {
+        ImGui::SeparatorText("Skeleton");
+        ImGui::Text("Nodes: %zu", skeleton->nodes.size());
+        ImGui::Text("Skins: %zu", skeleton->skins.size());
+        ImGui::Text("Animations: %zu", skeleton->animations.size());
       }
     } else {
       ImGui::TextUnformatted("Asset: Scene Model");
@@ -243,6 +335,187 @@ private:
                           ? "yes"
                           : "no");
     return materialChanged;
+  }
+
+  void buildSkeletonHierarchyNode() {
+    auto &settings = bindings.settings;
+    const SkeletonAssetData *skeleton = currentSkeleton();
+    if (skeleton == nullptr || skeleton->nodes.empty()) {
+      return;
+    }
+    const std::unordered_set<int> deformingBones = currentDeformingBoneSet();
+    if (deformingBones.empty()) {
+      return;
+    }
+
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                               ImGuiTreeNodeFlags_SpanAvailWidth |
+                               ImGuiTreeNodeFlags_DefaultOpen;
+    if (settings.selectedBoneIndex >= 0) {
+      flags |= ImGuiTreeNodeFlags_Selected;
+    }
+
+    const bool open = ImGui::TreeNodeEx("Skeleton##object_skeleton", flags);
+    if (ImGui::IsItemClicked()) {
+      settings.selectedBoneIndex = -1;
+      settings.selectedLightIndex = -1;
+    }
+    if (!open) {
+      return;
+    }
+
+    std::vector<bool> visited(skeleton->nodes.size(), false);
+    for (const int jointNodeIndex : deformingBones) {
+      if (jointNodeIndex < 0 ||
+          static_cast<size_t>(jointNodeIndex) >= skeleton->nodes.size()) {
+        continue;
+      }
+
+      const SkeletonNode &jointNode =
+          skeleton->nodes[static_cast<size_t>(jointNodeIndex)];
+      if (jointNode.parentIndex >= 0 &&
+          deformingBones.contains(jointNode.parentIndex)) {
+        continue;
+      }
+      buildBoneTreeNode(*skeleton, settings, visited, deformingBones,
+                        jointNodeIndex);
+    }
+
+    for (size_t nodeIndex = 0; nodeIndex < skeleton->nodes.size(); ++nodeIndex) {
+      if (deformingBones.contains(static_cast<int>(nodeIndex)) &&
+          !visited[nodeIndex]) {
+        buildBoneTreeNode(*skeleton, settings, visited, deformingBones,
+                          static_cast<int>(nodeIndex));
+      }
+    }
+
+    ImGui::TreePop();
+  }
+
+  void buildBoneTreeNode(const SkeletonAssetData &skeleton,
+                         DefaultDebugUISettings &settings,
+                         std::vector<bool> &visited,
+                         const std::unordered_set<int> &deformingBones,
+                         int nodeIndex) {
+    if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= skeleton.nodes.size()) {
+      return;
+    }
+    if (!deformingBones.contains(nodeIndex)) {
+      return;
+    }
+
+    visited[static_cast<size_t>(nodeIndex)] = true;
+    const SkeletonNode &node = skeleton.nodes[static_cast<size_t>(nodeIndex)];
+    const bool selected = settings.selectedBoneIndex == nodeIndex;
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                               ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (node.childIndices.empty()) {
+      flags |= ImGuiTreeNodeFlags_Leaf;
+    }
+    if (selected) {
+      flags |= ImGuiTreeNodeFlags_Selected;
+    }
+
+    const std::string label =
+        (node.name.empty() ? "Bone " + std::to_string(nodeIndex) : node.name) +
+        "##bone_" + std::to_string(nodeIndex);
+    const bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+    if (ImGui::IsItemClicked()) {
+      selectBone(nodeIndex);
+    }
+
+    if (open) {
+      for (const int childIndex : node.childIndices) {
+        buildBoneTreeNode(skeleton, settings, visited, deformingBones,
+                          childIndex);
+      }
+      ImGui::TreePop();
+    }
+  }
+
+  void buildBoneInspector() {
+    auto &settings = bindings.settings;
+    const SkeletonAssetData *skeleton = currentSkeleton();
+    if (skeleton == nullptr || skeleton->nodes.empty() ||
+        settings.selectedBoneIndex < 0 ||
+        static_cast<size_t>(settings.selectedBoneIndex) >= skeleton->nodes.size()) {
+      settings.selectedBoneIndex = -1;
+      ImGui::TextUnformatted("No bone selected.");
+      return;
+    }
+
+    const SkeletonNode &bone =
+        skeleton->nodes[static_cast<size_t>(settings.selectedBoneIndex)];
+    ImGui::Text("Bone: %s",
+                bone.name.empty() ? "<unnamed>" : bone.name.c_str());
+    ImGui::Text("Node Index: %d", settings.selectedBoneIndex);
+    ImGui::Text("Parent Index: %d", bone.parentIndex);
+    ImGui::Text("Child Count: %zu", bone.childIndices.size());
+
+    int referencedSkinCount = 0;
+    int jointReferenceCount = 0;
+    for (const auto &skin : skeleton->skins) {
+      bool skinContainsBone = false;
+      for (const int jointNodeIndex : skin.jointNodeIndices) {
+        if (jointNodeIndex != settings.selectedBoneIndex) {
+          continue;
+        }
+        skinContainsBone = true;
+        ++jointReferenceCount;
+      }
+      if (skinContainsBone) {
+        ++referencedSkinCount;
+      }
+    }
+
+    ImGui::SeparatorText("Bindings");
+    ImGui::Text("Referenced By Skins: %d", referencedSkinCount);
+    ImGui::Text("Joint References: %d", jointReferenceCount);
+
+    ImGui::SeparatorText("Local Bind Transform");
+    ImGui::Text("Translation: %.3f %.3f %.3f",
+                bone.localBindTransform.translation.x,
+                bone.localBindTransform.translation.y,
+                bone.localBindTransform.translation.z);
+    const glm::vec3 rotationDegrees =
+        glm::degrees(glm::eulerAngles(bone.localBindTransform.rotation));
+    ImGui::Text("Rotation (Euler): %.3f %.3f %.3f", rotationDegrees.x,
+                rotationDegrees.y, rotationDegrees.z);
+    ImGui::Text("Rotation (Quat): %.3f %.3f %.3f %.3f",
+                bone.localBindTransform.rotation.x,
+                bone.localBindTransform.rotation.y,
+                bone.localBindTransform.rotation.z,
+                bone.localBindTransform.rotation.w);
+    ImGui::Text("Scale: %.3f %.3f %.3f", bone.localBindTransform.scale.x,
+                bone.localBindTransform.scale.y, bone.localBindTransform.scale.z);
+
+    if (!bone.childIndices.empty()) {
+      ImGui::SeparatorText("Children");
+      for (const int childIndex : bone.childIndices) {
+        if (childIndex < 0 ||
+            static_cast<size_t>(childIndex) >= skeleton->nodes.size()) {
+          continue;
+        }
+        const SkeletonNode &child =
+            skeleton->nodes[static_cast<size_t>(childIndex)];
+        ImGui::BulletText("%s [%d]",
+                          child.name.empty() ? "<unnamed>" : child.name.c_str(),
+                          childIndex);
+      }
+    }
+
+    ImGui::SeparatorText("Animation");
+    int animatedTrackCount = 0;
+    for (const auto &animation : skeleton->animations) {
+      for (const auto &track : animation.tracks) {
+        if (track.targetNodeIndex == settings.selectedBoneIndex) {
+          ++animatedTrackCount;
+        }
+      }
+    }
+    ImGui::Text("Animated Tracks: %d", animatedTrackCount);
   }
 
   void buildLightInspector() {
