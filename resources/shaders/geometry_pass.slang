@@ -2,12 +2,16 @@ struct VSInput {
     [[vk::location(0)]] float3 position;
     [[vk::location(1)]] float3 normal;
     [[vk::location(2)]] float2 uv;
+    [[vk::location(4)]] uint4 jointIndices;
+    [[vk::location(5)]] float4 jointWeights;
 };
 
 struct VSOutput {
     float4 position : SV_Position;
     [[vk::location(0)]] float3 normalWS;
     [[vk::location(1)]] float2 uv;
+    [[vk::location(2)]] float selectedJointWeight;
+    [[vk::location(3)]] float boneWeightDebugEnabled;
 };
 
 struct GeometryData {
@@ -20,6 +24,9 @@ struct GeometryData {
 struct GeometryObjectData {
     float4x4 model;
     float4x4 modelNormal;
+    int boneWeightJointIndex;
+    int boneWeightDebugEnabled;
+    float2 debugPadding;
 };
 
 struct MaterialData {
@@ -53,12 +60,42 @@ VSOutput vertMain(VSInput input) {
 
     o.normalWS = normalize(mul((float3x3)objectData.modelNormal, input.normal));
     o.uv = input.uv;
+    o.selectedJointWeight = 0.0;
+    o.boneWeightDebugEnabled = objectData.boneWeightDebugEnabled;
+    if (objectData.boneWeightDebugEnabled != 0 &&
+        objectData.boneWeightJointIndex >= 0) {
+        uint selectedJointIndex = (uint)objectData.boneWeightJointIndex;
+        if (input.jointIndices.x == selectedJointIndex) o.selectedJointWeight += input.jointWeights.x;
+        if (input.jointIndices.y == selectedJointIndex) o.selectedJointWeight += input.jointWeights.y;
+        if (input.jointIndices.z == selectedJointIndex) o.selectedJointWeight += input.jointWeights.z;
+        if (input.jointIndices.w == selectedJointIndex) o.selectedJointWeight += input.jointWeights.w;
+    }
     return o;
+}
+
+float3 BoneWeightHeatmap(float weight) {
+    float t = saturate(weight);
+    const float3 low = float3(0.03, 0.12, 0.55);
+    const float3 mid = float3(0.10, 0.92, 0.82);
+    const float3 high = float3(1.00, 0.22, 0.08);
+    return t < 0.5
+        ? lerp(low, mid, t * 2.0)
+        : lerp(mid, high, (t - 0.5) * 2.0);
 }
 
 [shader("fragment")]
 FSOutput fragMain(VSOutput input) {
     FSOutput o;
+
+    if (input.boneWeightDebugEnabled > 0.5) {
+        float3 heatmap = BoneWeightHeatmap(input.selectedJointWeight);
+        float3 packedNormal = normalize(input.normalWS) * 0.5 + 0.5;
+        o.gbuffer0 = float4(heatmap, 1.0);
+        o.gbuffer1 = float4(packedNormal, 1.0);
+        o.gbuffer2 = float4(0.0, 1.0, 1.0, 1.0);
+        o.gbuffer3 = float4(heatmap, 1.0);
+        return o;
+    }
 
     float4 baseColorSample = baseColorTexture.Sample(input.uv);
     float4 metallicRoughnessSample = metallicRoughnessTexture.Sample(input.uv);

@@ -140,9 +140,15 @@ public:
 
       const std::vector<glm::mat4> objectMatrices = {
           sceneTransformMatrix(settings.sceneObjects[index].transform)};
+      const int selectedBoneIndex =
+          geometryPass != nullptr && settings.showBoneWeights &&
+                  static_cast<int>(index) == settings.selectedObjectIndex
+              ? settings.selectedBoneIndex
+              : -1;
 
       appendItems(renderItems, sceneAssetModels[index].buildRenderItems(
-                                   geometryPass, objectMatrices));
+                                   geometryPass, objectMatrices,
+                                   selectedBoneIndex));
 
       if (directionalShadowPass != nullptr) {
         appendItems(renderItems, sceneAssetModels[index].buildRenderItems(

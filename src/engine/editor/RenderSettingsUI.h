@@ -55,6 +55,7 @@ private:
     ImGui::Checkbox("Show Bones", &settings.bonesVisible);
     ImGui::SliderFloat("Bone Marker Scale", &settings.boneMarkerScale, 0.01f,
                        0.5f, "%.3f");
+    ImGui::Checkbox("Show Bone Weights", &settings.showBoneWeights);
   }
 
   void buildTonemapUi() {

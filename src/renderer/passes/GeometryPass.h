@@ -7,6 +7,9 @@
 struct GeometryPassPushConstant {
   glm::mat4 model{1.0f};
   glm::mat4 modelNormal{1.0f};
+  int boneWeightJointIndex = -1;
+  int boneWeightDebugEnabled = 0;
+  glm::vec2 debugPadding{0.0f};
 };
 
 class GeometryPass : public SceneRenderPass {
@@ -71,6 +74,8 @@ protected:
     GeometryPassPushConstant push{
         .model = renderItem.modelMatrix,
         .modelNormal = renderItem.modelNormalMatrix,
+        .boneWeightJointIndex = renderItem.boneWeightJointIndex,
+        .boneWeightDebugEnabled = renderItem.boneWeightDebugEnabled,
     };
     context.commandBuffer.pushConstants<GeometryPassPushConstant>(
         *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});

@@ -6,13 +6,13 @@
   "cameraFarPlane": 100.0,
   "cameraLookSensitivity": 0.0035000001080334187,
   "cameraMoveSpeed": 2.5,
-  "cameraPitchRadians": -0.29681646823883057,
+  "cameraPitchRadians": -0.5137481689453125,
   "cameraPosition": [
-    1.0959104299545288,
-    1.9975844621658325,
-    3.941030740737915
+    2.640413522720337,
+    2.700374126434326,
+    2.0962657928466797
   ],
-  "cameraYawRadians": -0.24751219153404236,
+  "cameraYawRadians": -0.9560728073120117,
   "dielectricSpecularScale": 1.0,
   "directionalShadowExtent": 12.0,
   "directionalShadowFarPlane": 24.0,
@@ -83,7 +83,7 @@
     1.0
   ],
   "pbrDebugView": 0,
-  "presentedOutput": 7,
+  "presentedOutput": 0,
   "sceneLights": [
     {
       "castsShadow": true,
@@ -136,11 +136,12 @@
       "visible": true
     }
   ],
-  "selectedBoneIndex": 51,
+  "selectedBoneIndex": 26,
   "selectedLightIndex": -1,
   "selectedMaterialIndex": 0,
   "selectedObjectIndex": 0,
   "shadowsEnabled": true,
+  "showBoneWeights": true,
   "skyboxVisible": false,
   "syncSkySunToLight": true,
   "tonemapOperator": 2,

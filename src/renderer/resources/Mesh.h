@@ -519,7 +519,7 @@ struct GeometryVertex {
     return {0, sizeof(GeometryVertex), vk::VertexInputRate::eVertex};
   }
 
-  static std::array<vk::VertexInputAttributeDescription, 4>
+  static std::array<vk::VertexInputAttributeDescription, 6>
   getAttributeDescriptions() {
     return {
         vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,
@@ -530,7 +530,15 @@ struct GeometryVertex {
                                             offsetof(GeometryVertex, texCoord)),
         vk::VertexInputAttributeDescription(3, 0,
                                             vk::Format::eR32G32B32A32Sfloat,
-                                            offsetof(GeometryVertex, tangent))};
+                                            offsetof(GeometryVertex, tangent)),
+        vk::VertexInputAttributeDescription(4, 0,
+                                            vk::Format::eR32G32B32A32Uint,
+                                            offsetof(GeometryVertex,
+                                                     jointIndices)),
+        vk::VertexInputAttributeDescription(5, 0,
+                                            vk::Format::eR32G32B32A32Sfloat,
+                                            offsetof(GeometryVertex,
+                                                     jointWeights))};
   }
 
   bool operator==(const GeometryVertex &other) const {

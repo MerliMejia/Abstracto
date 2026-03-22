@@ -58,6 +58,7 @@ struct DefaultDebugUISettings {
   float lightMarkerScale = 0.35f;
   bool bonesVisible = true;
   float boneMarkerScale = 0.08f;
+  bool showBoneWeights = false;
   bool shadowsEnabled = true;
   float directionalShadowExtent = 12.0f;
   float directionalShadowNearPlane = 0.1f;

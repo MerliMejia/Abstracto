@@ -24,6 +24,8 @@ struct RenderItem {
   uint32_t indexCount = 0;
   glm::mat4 modelMatrix{1.0f};
   glm::mat4 modelNormalMatrix{1.0f};
+  int boneWeightJointIndex = -1;
+  int boneWeightDebugEnabled = 0;
 };
 
 struct RenderPassContext {

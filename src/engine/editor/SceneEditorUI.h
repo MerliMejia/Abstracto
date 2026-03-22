@@ -49,6 +49,68 @@ private:
     return deformingBones;
   }
 
+  static int nearestDeformingParentIndex(
+      const SkeletonAssetData &skeleton,
+      const std::unordered_set<int> &deformingBones, int nodeIndex) {
+    if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= skeleton.nodes.size()) {
+      return -1;
+    }
+
+    int parentIndex = skeleton.nodes[static_cast<size_t>(nodeIndex)].parentIndex;
+    while (parentIndex >= 0) {
+      if (deformingBones.contains(parentIndex)) {
+        return parentIndex;
+      }
+      if (static_cast<size_t>(parentIndex) >= skeleton.nodes.size()) {
+        return -1;
+      }
+      parentIndex = skeleton.nodes[static_cast<size_t>(parentIndex)].parentIndex;
+    }
+    return -1;
+  }
+
+  static std::vector<std::vector<int>>
+  buildCompressedDeformingChildren(const SkeletonAssetData &skeleton,
+                                   const std::unordered_set<int> &deformingBones) {
+    std::vector<std::vector<int>> compressedChildren(skeleton.nodes.size());
+    for (size_t nodeIndex = 0; nodeIndex < skeleton.nodes.size(); ++nodeIndex) {
+      if (!deformingBones.contains(static_cast<int>(nodeIndex))) {
+        continue;
+      }
+
+      const int parentIndex = nearestDeformingParentIndex(
+          skeleton, deformingBones, static_cast<int>(nodeIndex));
+      if (parentIndex >= 0) {
+        compressedChildren[static_cast<size_t>(parentIndex)].push_back(
+            static_cast<int>(nodeIndex));
+      }
+    }
+
+    for (auto &children : compressedChildren) {
+      std::sort(children.begin(), children.end());
+      children.erase(std::unique(children.begin(), children.end()),
+                     children.end());
+    }
+
+    return compressedChildren;
+  }
+
+  static void markCompressedBoneSubtreeVisited(
+      std::vector<bool> &visited,
+      const std::vector<std::vector<int>> &compressedChildren, int nodeIndex) {
+    if (nodeIndex < 0 ||
+        static_cast<size_t>(nodeIndex) >= compressedChildren.size() ||
+        visited[static_cast<size_t>(nodeIndex)]) {
+      return;
+    }
+
+    visited[static_cast<size_t>(nodeIndex)] = true;
+    for (const int childIndex :
+         compressedChildren[static_cast<size_t>(nodeIndex)]) {
+      markCompressedBoneSubtreeVisited(visited, compressedChildren, childIndex);
+    }
+  }
+
   void clampBoneSelection(DefaultDebugUISettings &settings) const {
     const SkeletonAssetData *skeleton = currentSkeleton();
     if (skeleton == nullptr || skeleton->nodes.empty()) {
@@ -347,6 +409,8 @@ private:
     if (deformingBones.empty()) {
       return;
     }
+    const std::vector<std::vector<int>> compressedChildren =
+        buildCompressedDeformingChildren(*skeleton, deformingBones);
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
@@ -374,19 +438,23 @@ private:
 
       const SkeletonNode &jointNode =
           skeleton->nodes[static_cast<size_t>(jointNodeIndex)];
-      if (jointNode.parentIndex >= 0 &&
-          deformingBones.contains(jointNode.parentIndex)) {
+      if (nearestDeformingParentIndex(*skeleton, deformingBones,
+                                      jointNodeIndex) >= 0) {
         continue;
       }
-      buildBoneTreeNode(*skeleton, settings, visited, deformingBones,
-                        jointNodeIndex);
+      markCompressedBoneSubtreeVisited(visited, compressedChildren,
+                                       jointNodeIndex);
+      buildBoneTreeNode(*skeleton, settings, deformingBones,
+                        compressedChildren, jointNodeIndex);
     }
 
     for (size_t nodeIndex = 0; nodeIndex < skeleton->nodes.size(); ++nodeIndex) {
       if (deformingBones.contains(static_cast<int>(nodeIndex)) &&
           !visited[nodeIndex]) {
-        buildBoneTreeNode(*skeleton, settings, visited, deformingBones,
-                          static_cast<int>(nodeIndex));
+        markCompressedBoneSubtreeVisited(visited, compressedChildren,
+                                         static_cast<int>(nodeIndex));
+        buildBoneTreeNode(*skeleton, settings, deformingBones,
+                          compressedChildren, static_cast<int>(nodeIndex));
       }
     }
 
@@ -395,8 +463,8 @@ private:
 
   void buildBoneTreeNode(const SkeletonAssetData &skeleton,
                          DefaultDebugUISettings &settings,
-                         std::vector<bool> &visited,
                          const std::unordered_set<int> &deformingBones,
+                         const std::vector<std::vector<int>> &compressedChildren,
                          int nodeIndex) {
     if (nodeIndex < 0 || static_cast<size_t>(nodeIndex) >= skeleton.nodes.size()) {
       return;
@@ -404,14 +472,14 @@ private:
     if (!deformingBones.contains(nodeIndex)) {
       return;
     }
-
-    visited[static_cast<size_t>(nodeIndex)] = true;
     const SkeletonNode &node = skeleton.nodes[static_cast<size_t>(nodeIndex)];
     const bool selected = settings.selectedBoneIndex == nodeIndex;
+    const auto &visualChildren =
+        compressedChildren[static_cast<size_t>(nodeIndex)];
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (node.childIndices.empty()) {
+    if (visualChildren.empty()) {
       flags |= ImGuiTreeNodeFlags_Leaf;
     }
     if (selected) {
@@ -427,9 +495,9 @@ private:
     }
 
     if (open) {
-      for (const int childIndex : node.childIndices) {
-        buildBoneTreeNode(skeleton, settings, visited, deformingBones,
-                          childIndex);
+      for (const int childIndex : visualChildren) {
+        buildBoneTreeNode(skeleton, settings, deformingBones,
+                          compressedChildren, childIndex);
       }
       ImGui::TreePop();
     }
@@ -450,6 +518,9 @@ private:
 
     const SkeletonNode &bone =
         skeleton->nodes[static_cast<size_t>(settings.selectedBoneIndex)];
+    const std::unordered_set<int> deformingBones = currentDeformingBoneSet();
+    const std::vector<std::vector<int>> compressedChildren =
+        buildCompressedDeformingChildren(*skeleton, deformingBones);
     ImGui::Text("Bone: %s",
                 bone.name.empty() ? "<unnamed>" : bone.name.c_str());
     ImGui::Text("Node Index: %d", settings.selectedBoneIndex);
@@ -475,6 +546,9 @@ private:
     ImGui::SeparatorText("Bindings");
     ImGui::Text("Referenced By Skins: %d", referencedSkinCount);
     ImGui::Text("Joint References: %d", jointReferenceCount);
+    ImGui::Text("Visual Parent Index: %d",
+                nearestDeformingParentIndex(*skeleton, deformingBones,
+                                            settings.selectedBoneIndex));
 
     ImGui::SeparatorText("Local Bind Transform");
     ImGui::Text("Translation: %.3f %.3f %.3f",
@@ -528,9 +602,11 @@ private:
     ImGui::Text("Position: %.3f %.3f %.3f", worldTransform[3].x,
                 worldTransform[3].y, worldTransform[3].z);
 
-    if (!bone.childIndices.empty()) {
-      ImGui::SeparatorText("Children");
-      for (const int childIndex : bone.childIndices) {
+    const auto &visualChildren =
+        compressedChildren[static_cast<size_t>(settings.selectedBoneIndex)];
+    if (!visualChildren.empty()) {
+      ImGui::SeparatorText("Visual Children");
+      for (const int childIndex : visualChildren) {
         if (childIndex < 0 ||
             static_cast<size_t>(childIndex) >= skeleton->nodes.size()) {
           continue;

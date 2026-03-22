@@ -202,6 +202,7 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"lightMarkerScale", settings.lightMarkerScale},
       {"bonesVisible", settings.bonesVisible},
       {"boneMarkerScale", settings.boneMarkerScale},
+      {"showBoneWeights", settings.showBoneWeights},
       {"shadowsEnabled", settings.shadowsEnabled},
       {"directionalShadowExtent", settings.directionalShadowExtent},
       {"directionalShadowNearPlane", settings.directionalShadowNearPlane},
@@ -300,6 +301,8 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
   settings.bonesVisible = value.value("bonesVisible", settings.bonesVisible);
   settings.boneMarkerScale = std::max(
       value.value("boneMarkerScale", settings.boneMarkerScale), 0.005f);
+  settings.showBoneWeights =
+      value.value("showBoneWeights", settings.showBoneWeights);
   settings.shadowsEnabled =
       value.value("shadowsEnabled", settings.shadowsEnabled);
   settings.directionalShadowExtent = std::max(

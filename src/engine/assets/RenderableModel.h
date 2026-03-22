@@ -71,7 +71,8 @@ public:
 
   std::vector<RenderItem>
   buildRenderItems(const RenderPass *targetPass,
-                   const std::vector<glm::mat4> &itemModelMatrices = {}) {
+                   const std::vector<glm::mat4> &itemModelMatrices = {},
+                   int selectedBoneNodeIndex = -1) {
     if (asset == nullptr) {
       throw std::runtime_error("RenderableModel has no loaded asset");
     }
@@ -90,10 +91,13 @@ public:
           .targetPass = targetPass,
           .modelMatrix = modelMatrix,
           .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
+          .boneWeightJointIndex = -1,
+          .boneWeightDebugEnabled = 0,
       });
       return items;
     }
 
+    const SkeletonAssetData *skeleton = asset->skeletonAsset();
     for (size_t index = 0; index < submeshes.size(); ++index) {
       const auto &submesh = submeshes[index];
       glm::mat4 modelMatrix = submesh.transform;
@@ -102,6 +106,24 @@ public:
       } else if (itemModelMatrices.size() == submeshes.size()) {
         modelMatrix = itemModelMatrices[index];
       }
+
+      int selectedJointIndex = -1;
+      if (selectedBoneNodeIndex >= 0 && skeleton != nullptr &&
+          submesh.skinIndex >= 0 &&
+          static_cast<size_t>(submesh.skinIndex) < skeleton->skins.size()) {
+        const auto &jointNodeIndices =
+            skeleton->skins[static_cast<size_t>(submesh.skinIndex)]
+                .jointNodeIndices;
+        const auto selectedJointIt =
+            std::find(jointNodeIndices.begin(), jointNodeIndices.end(),
+                      selectedBoneNodeIndex);
+        if (selectedJointIt != jointNodeIndices.end()) {
+          selectedJointIndex =
+              static_cast<int>(std::distance(jointNodeIndices.begin(),
+                                             selectedJointIt));
+        }
+      }
+
       items.push_back(RenderItem{
           .mesh = &asset->mesh(),
           .descriptorBindings =
@@ -111,6 +133,8 @@ public:
           .indexCount = submesh.indexCount,
           .modelMatrix = modelMatrix,
           .modelNormalMatrix = glm::inverseTranspose(modelMatrix),
+          .boneWeightJointIndex = selectedJointIndex,
+          .boneWeightDebugEnabled = selectedBoneNodeIndex >= 0 ? 1 : 0,
       });
     }
 
