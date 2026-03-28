@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AnimationEditorUI.h"
 #include "DebugUIState.h"
 #include "RenderSettingsUI.h"
 #include "SceneEditorUI.h"
@@ -13,12 +14,14 @@ public:
       : bindings(std::move(bindings)) {}
 
   static DefaultDebugUI
-  create(RenderableModel &sceneModel, DefaultDebugUISettings &settings,
+  create(RenderableModel &sceneModel, std::vector<RenderableModel> &sceneModels,
+         DefaultDebugUISettings &settings,
          DefaultDebugUICallbacks callbacks,
          DefaultDebugUIPerformanceStats performanceStats = {},
          ImGuiID dockspaceId = 0) {
     return DefaultDebugUI(DefaultDebugUIBindings{
         .sceneModel = sceneModel,
+        .sceneModels = sceneModels,
         .settings = settings,
         .callbacks = std::move(callbacks),
         .performanceStats = performanceStats,
@@ -31,8 +34,10 @@ public:
 
     DefaultDebugUIResult result;
     SceneEditorUI sceneEditorUi(bindings);
+    AnimationEditorUI animationEditorUi(bindings);
     RenderSettingsUI renderSettingsUi(bindings);
     result.materialChanged = sceneEditorUi.build();
+    animationEditorUi.build();
     result.iblBakeRequested = renderSettingsUi.buildWorldPanel();
     buildToolsPanel(result);
     return result;
@@ -62,7 +67,9 @@ private:
                                                     0.28f, nullptr, &dockMain);
 
     ImGui::DockBuilderDockWindow("Hierarchy", dockLeft);
+    ImGui::DockBuilderDockWindow("Animations", dockLeft);
     ImGui::DockBuilderDockWindow("Inspector", dockRight);
+    ImGui::DockBuilderDockWindow("Animation Inspector", dockRight);
     ImGui::DockBuilderDockWindow("World", dockRight);
     ImGui::DockBuilderDockWindow("Tools", dockBottom);
     ImGui::DockBuilderFinish(bindings.dockspaceId);

@@ -82,3 +82,49 @@ inline TypedMesh<Vertex> buildDirectionalLightMarkerMesh() {
       });
   return mesh;
 }
+
+inline TypedMesh<Vertex> buildBoneSegmentMesh() {
+  TypedMesh<Vertex> mesh;
+  const glm::vec3 color(1.0f, 1.0f, 1.0f);
+  mesh.setGeometry(
+      {
+          {{0.0f, 0.0f, 0.0f}, color, {0.0f, 0.0f}},
+          {{0.18f, 0.0f, 0.26f}, color, {0.0f, 0.0f}},
+          {{-0.18f, 0.0f, 0.26f}, color, {0.0f, 0.0f}},
+          {{0.0f, 0.18f, 0.26f}, color, {0.0f, 0.0f}},
+          {{0.0f, -0.18f, 0.26f}, color, {0.0f, 0.0f}},
+          {{0.0f, 0.0f, 1.0f}, color, {0.0f, 0.0f}},
+      },
+      {
+          0, 1, 0, 2, 0, 3, 0, 4,
+          1, 3, 3, 2, 2, 4, 4, 1,
+          1, 5, 2, 5, 3, 5, 4, 5,
+          0, 5,
+      });
+  return mesh;
+}
+
+inline TypedMesh<Vertex> buildBoneJointMarkerMesh() {
+  TypedMesh<Vertex> mesh;
+  const glm::vec3 color(1.0f, 1.0f, 1.0f);
+  mesh.setGeometry(
+      {
+          {{-1.0f, 0.0f, 0.0f}, color, {0.0f, 0.0f}},
+          {{1.0f, 0.0f, 0.0f}, color, {0.0f, 0.0f}},
+          {{0.0f, -1.0f, 0.0f}, color, {0.0f, 0.0f}},
+          {{0.0f, 1.0f, 0.0f}, color, {0.0f, 0.0f}},
+          {{0.0f, 0.0f, -1.0f}, color, {0.0f, 0.0f}},
+          {{0.0f, 0.0f, 1.0f}, color, {0.0f, 0.0f}},
+          {{-0.55f, -0.55f, -0.55f}, color, {0.0f, 0.0f}},
+          {{0.55f, 0.55f, 0.55f}, color, {0.0f, 0.0f}},
+          {{-0.55f, 0.55f, -0.55f}, color, {0.0f, 0.0f}},
+          {{0.55f, -0.55f, 0.55f}, color, {0.0f, 0.0f}},
+          {{0.55f, -0.55f, -0.55f}, color, {0.0f, 0.0f}},
+          {{-0.55f, 0.55f, 0.55f}, color, {0.0f, 0.0f}},
+      },
+      {
+          0, 1, 2, 3, 4, 5,
+          6, 7, 8, 9, 10, 11,
+      });
+  return mesh;
+}

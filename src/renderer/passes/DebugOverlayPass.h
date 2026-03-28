@@ -17,6 +17,11 @@ struct DebugOverlayPushConstant {
   glm::vec4 color{1.0f};
 };
 
+struct DebugOverlayInstance {
+  glm::mat4 model{1.0f};
+  glm::vec4 color{1.0f};
+};
+
 class DebugOverlayPass : public RasterRenderPass {
 public:
   DebugOverlayPass(PipelineSpec spec, uint32_t framesInFlight,
@@ -44,9 +49,18 @@ public:
   void setPointMarkerMesh(Mesh &mesh) { pointMarkerMesh = &mesh; }
   void setSpotMarkerMesh(Mesh &mesh) { spotMarkerMesh = &mesh; }
   void setDirectionalMarkerMesh(Mesh &mesh) { directionalMarkerMesh = &mesh; }
+  void setBoneSegmentMesh(Mesh &mesh) { boneSegmentMesh = &mesh; }
+  void setBoneJointMesh(Mesh &mesh) { boneJointMesh = &mesh; }
 
   void setMarkersVisible(bool visible) { markersVisible = visible; }
   void setMarkerScale(float scale) { markerScale = std::max(scale, 0.01f); }
+  void setBonesVisible(bool visible) { bonesVisible = visible; }
+  void setBoneSegments(std::vector<DebugOverlayInstance> instances) {
+    boneSegments = std::move(instances);
+  }
+  void setBoneMarkers(std::vector<DebugOverlayInstance> instances) {
+    boneMarkers = std::move(instances);
+  }
   void setDirectionalAnchor(const glm::vec3 &anchor) {
     directionalAnchor = anchor;
   }
@@ -126,6 +140,22 @@ protected:
         break;
       }
     }
+
+    if (!bonesVisible) {
+      return;
+    }
+
+    if (boneSegmentMesh != nullptr) {
+      for (const auto &segment : boneSegments) {
+        drawMarker(context, *boneSegmentMesh, segment.model, segment.color);
+      }
+    }
+
+    if (boneJointMesh != nullptr) {
+      for (const auto &marker : boneMarkers) {
+        drawMarker(context, *boneJointMesh, marker.model, marker.color);
+      }
+    }
   }
 
 private:
@@ -136,9 +166,14 @@ private:
   Mesh *pointMarkerMesh = nullptr;
   Mesh *spotMarkerMesh = nullptr;
   Mesh *directionalMarkerMesh = nullptr;
+  Mesh *boneSegmentMesh = nullptr;
+  Mesh *boneJointMesh = nullptr;
   bool markersVisible = true;
   float markerScale = 0.35f;
+  bool bonesVisible = true;
   glm::vec3 directionalAnchor{0.0f, 0.0f, 0.0f};
+  std::vector<DebugOverlayInstance> boneSegments;
+  std::vector<DebugOverlayInstance> boneMarkers;
 
   static glm::vec3 safeDirection(const glm::vec3 &direction,
                                  const glm::vec3 &fallback) {

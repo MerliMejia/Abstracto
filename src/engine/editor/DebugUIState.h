@@ -49,12 +49,18 @@ struct DefaultDebugUISettings {
   int selectedMaterialIndex = 0;
   int selectedObjectIndex = 0;
   int selectedLightIndex = -1;
+  int selectedBoneIndex = -1;
+  int selectedAnimationObjectIndex = -1;
+  int selectedAnimationIndex = -1;
 
   std::vector<SceneObject> sceneObjects{SceneObject{}};
 
   SceneLightSet sceneLights = SceneLightSet::showcaseLights();
   bool lightMarkersVisible = true;
   float lightMarkerScale = 0.35f;
+  bool bonesVisible = true;
+  float boneMarkerScale = 0.08f;
+  bool showBoneWeights = false;
   bool shadowsEnabled = true;
   float directionalShadowExtent = 12.0f;
   float directionalShadowNearPlane = 0.1f;
@@ -214,6 +220,7 @@ struct DefaultDebugUIPerformanceStats {
 
 struct DefaultDebugUIBindings {
   RenderableModel &sceneModel;
+  std::vector<RenderableModel> &sceneModels;
   DefaultDebugUISettings &settings;
   DefaultDebugUICallbacks callbacks;
   DefaultDebugUIPerformanceStats performanceStats;

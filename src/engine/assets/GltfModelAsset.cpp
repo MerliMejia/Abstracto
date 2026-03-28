@@ -1,8 +1,12 @@
 #include "GltfModelAsset.h"
 
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/hash.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -18,45 +22,79 @@ struct IndexedNode {
   glm::mat4 worldTransform{1.0f};
 };
 
-glm::mat4 nodeLocalTransform(const tinygltf::Node &node) {
-  if (node.matrix.size() == 16) {
-    glm::mat4 matrix(1.0f);
-    for (int column = 0; column < 4; ++column) {
-      for (int row = 0; row < 4; ++row) {
-        matrix[column][row] = static_cast<float>(node.matrix[column * 4 + row]);
-      }
-    }
-    return matrix;
+glm::mat4 matrixFromDoubleArray(const std::vector<double> &values) {
+  if (values.size() != 16) {
+    throw std::runtime_error("glTF matrix must have 16 components");
   }
 
-  glm::vec3 translation(0.0f);
+  glm::mat4 matrix(1.0f);
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      matrix[column][row] = static_cast<float>(values[column * 4 + row]);
+    }
+  }
+  return matrix;
+}
+
+NodeTransform nodeLocalComponents(const tinygltf::Node &node) {
+  NodeTransform transform;
+
+  if (node.matrix.size() == 16) {
+    const glm::mat4 matrix = matrixFromDoubleArray(node.matrix);
+    glm::vec3 skew(0.0f);
+    glm::vec4 perspective(0.0f);
+    if (!glm::decompose(matrix, transform.scale, transform.rotation,
+                        transform.translation, skew, perspective)) {
+      throw std::runtime_error("failed to decompose glTF node matrix");
+    }
+    if (glm::length(transform.rotation) < 1e-6f) {
+      transform.rotation = glm::identity<glm::quat>();
+    } else {
+      transform.rotation = glm::normalize(transform.rotation);
+    }
+    return transform;
+  }
+
   if (node.translation.size() == 3) {
-    translation = {
+    transform.translation = {
         static_cast<float>(node.translation[0]),
         static_cast<float>(node.translation[1]),
         static_cast<float>(node.translation[2]),
     };
   }
 
-  glm::quat rotation = glm::identity<glm::quat>();
   if (node.rotation.size() == 4) {
-    rotation = glm::quat(static_cast<float>(node.rotation[3]),
-                         static_cast<float>(node.rotation[0]),
-                         static_cast<float>(node.rotation[1]),
-                         static_cast<float>(node.rotation[2]));
+    transform.rotation = glm::quat(static_cast<float>(node.rotation[3]),
+                                   static_cast<float>(node.rotation[0]),
+                                   static_cast<float>(node.rotation[1]),
+                                   static_cast<float>(node.rotation[2]));
+    if (glm::length(transform.rotation) < 1e-6f) {
+      transform.rotation = glm::identity<glm::quat>();
+    } else {
+      transform.rotation = glm::normalize(transform.rotation);
+    }
   }
 
-  glm::vec3 scale(1.0f);
   if (node.scale.size() == 3) {
-    scale = {
+    transform.scale = {
         static_cast<float>(node.scale[0]),
         static_cast<float>(node.scale[1]),
         static_cast<float>(node.scale[2]),
     };
   }
 
-  return glm::translate(glm::mat4(1.0f), translation) *
-         glm::mat4_cast(rotation) * glm::scale(glm::mat4(1.0f), scale);
+  return transform;
+}
+
+glm::mat4 nodeLocalTransform(const tinygltf::Node &node) {
+  if (node.matrix.size() == 16) {
+    return matrixFromDoubleArray(node.matrix);
+  }
+
+  const NodeTransform transform = nodeLocalComponents(node);
+  return glm::translate(glm::mat4(1.0f), transform.translation) *
+         glm::mat4_cast(transform.rotation) *
+         glm::scale(glm::mat4(1.0f), transform.scale);
 }
 
 void traverseNode(const tinygltf::Model &model, int nodeIndex,
@@ -83,8 +121,8 @@ std::vector<IndexedNode> collectSceneNodes(const tinygltf::Model &model) {
     return nodes;
   }
 
-  for (size_t sceneIndex = 0; sceneIndex < model.scenes.size(); ++sceneIndex) {
-    for (const int nodeIndex : model.scenes[sceneIndex].nodes) {
+  for (const auto &scene : model.scenes) {
+    for (const int nodeIndex : scene.nodes) {
       traverseNode(model, nodeIndex, glm::mat4(1.0f), nodes);
     }
   }
@@ -93,6 +131,83 @@ std::vector<IndexedNode> collectSceneNodes(const tinygltf::Model &model) {
     for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex) {
       traverseNode(model, static_cast<int>(nodeIndex), glm::mat4(1.0f), nodes);
     }
+  }
+
+  return nodes;
+}
+
+void appendUniqueIndex(std::vector<int> &indices, int index) {
+  if (std::find(indices.begin(), indices.end(), index) == indices.end()) {
+    indices.push_back(index);
+  }
+}
+
+std::vector<int> buildNodeParentIndices(const tinygltf::Model &model) {
+  std::vector<int> parentIndices(model.nodes.size(), -1);
+
+  for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex) {
+    const auto &node = model.nodes[nodeIndex];
+    for (const int childIndex : node.children) {
+      if (childIndex < 0 ||
+          static_cast<size_t>(childIndex) >= model.nodes.size()) {
+        throw std::runtime_error("glTF node child index out of range");
+      }
+      if (parentIndices[static_cast<size_t>(childIndex)] != -1) {
+        throw std::runtime_error("glTF node has multiple parents");
+      }
+      parentIndices[static_cast<size_t>(childIndex)] =
+          static_cast<int>(nodeIndex);
+    }
+  }
+
+  return parentIndices;
+}
+
+std::vector<int> collectSceneRootNodeIndices(const tinygltf::Model &model) {
+  std::vector<int> roots;
+
+  if (model.defaultScene >= 0 &&
+      static_cast<size_t>(model.defaultScene) < model.scenes.size()) {
+    for (const int nodeIndex : model.scenes[model.defaultScene].nodes) {
+      appendUniqueIndex(roots, nodeIndex);
+    }
+    return roots;
+  }
+
+  for (const auto &scene : model.scenes) {
+    for (const int nodeIndex : scene.nodes) {
+      appendUniqueIndex(roots, nodeIndex);
+    }
+  }
+
+  if (!roots.empty()) {
+    return roots;
+  }
+
+  const auto parentIndices = buildNodeParentIndices(model);
+  for (size_t nodeIndex = 0; nodeIndex < parentIndices.size(); ++nodeIndex) {
+    if (parentIndices[nodeIndex] == -1) {
+      roots.push_back(static_cast<int>(nodeIndex));
+    }
+  }
+
+  return roots;
+}
+
+std::vector<SkeletonNode> buildSkeletonNodes(const tinygltf::Model &model) {
+  const auto parentIndices = buildNodeParentIndices(model);
+  std::vector<SkeletonNode> nodes;
+  nodes.reserve(model.nodes.size());
+
+  for (size_t nodeIndex = 0; nodeIndex < model.nodes.size(); ++nodeIndex) {
+    const auto &sourceNode = model.nodes[nodeIndex];
+    SkeletonNode node;
+    node.name = sourceNode.name.empty() ? "Node " + std::to_string(nodeIndex)
+                                        : sourceNode.name;
+    node.parentIndex = parentIndices[nodeIndex];
+    node.childIndices = sourceNode.children;
+    node.localBindTransform = nodeLocalComponents(sourceNode);
+    nodes.push_back(std::move(node));
   }
 
   return nodes;
@@ -237,6 +352,11 @@ const tinygltf::Accessor &accessorAt(const tinygltf::Model &model, int index) {
 
 const unsigned char *accessorData(const tinygltf::Model &model,
                                   const tinygltf::Accessor &accessor) {
+  if (accessor.sparse.isSparse) {
+    throw std::runtime_error(
+        "sparse glTF accessors are not currently supported");
+  }
+
   if (accessor.bufferView < 0 ||
       static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
     throw std::runtime_error("glTF accessor is missing a buffer view");
@@ -267,16 +387,15 @@ size_t accessorStride(const tinygltf::Model &model,
       tinygltf::GetNumComponentsInType(accessor.type));
 }
 
-glm::vec3 readVec3(const tinygltf::Model &model,
-                   const tinygltf::Accessor &accessor, size_t index) {
-  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
-      accessor.type != TINYGLTF_TYPE_VEC3) {
-    throw std::runtime_error("glTF accessor must be FLOAT VEC3");
+const unsigned char *accessorElementData(const tinygltf::Model &model,
+                                         const tinygltf::Accessor &accessor,
+                                         size_t index) {
+  if (index >= accessor.count) {
+    throw std::runtime_error("glTF accessor element index out of range");
   }
 
-  const auto *data = reinterpret_cast<const float *>(
-      accessorData(model, accessor) + accessorStride(model, accessor) * index);
-  return {data[0], data[1], data[2]};
+  return accessorData(model, accessor) +
+         accessorStride(model, accessor) * index;
 }
 
 glm::vec2 readVec2(const tinygltf::Model &model,
@@ -287,8 +406,62 @@ glm::vec2 readVec2(const tinygltf::Model &model,
   }
 
   const auto *data = reinterpret_cast<const float *>(
-      accessorData(model, accessor) + accessorStride(model, accessor) * index);
+      accessorElementData(model, accessor, index));
   return {data[0], data[1]};
+}
+
+glm::vec3 readVec3(const tinygltf::Model &model,
+                   const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+      accessor.type != TINYGLTF_TYPE_VEC3) {
+    throw std::runtime_error("glTF accessor must be FLOAT VEC3");
+  }
+
+  const auto *data = reinterpret_cast<const float *>(
+      accessorElementData(model, accessor, index));
+  return {data[0], data[1], data[2]};
+}
+
+glm::vec4 readVec4(const tinygltf::Model &model,
+                   const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+      accessor.type != TINYGLTF_TYPE_VEC4) {
+    throw std::runtime_error("glTF accessor must be FLOAT VEC4");
+  }
+
+  const auto *data = reinterpret_cast<const float *>(
+      accessorElementData(model, accessor, index));
+  return {data[0], data[1], data[2], data[3]};
+}
+
+glm::mat4 readMat4(const tinygltf::Model &model,
+                   const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+      accessor.type != TINYGLTF_TYPE_MAT4) {
+    throw std::runtime_error("glTF accessor must be FLOAT MAT4");
+  }
+
+  const auto *data = reinterpret_cast<const float *>(
+      accessorElementData(model, accessor, index));
+  glm::mat4 matrix(1.0f);
+  for (int column = 0; column < 4; ++column) {
+    for (int row = 0; row < 4; ++row) {
+      matrix[column][row] = data[column * 4 + row];
+    }
+  }
+  return matrix;
+}
+
+float readScalarFloat(const tinygltf::Model &model,
+                      const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+      accessor.type != TINYGLTF_TYPE_SCALAR) {
+    throw std::runtime_error("glTF accessor must be FLOAT SCALAR");
+  }
+
+  const auto *data = reinterpret_cast<const float *>(
+      accessorElementData(model, accessor, index));
+  return data[0];
 }
 
 uint32_t readIndex(const tinygltf::Model &model,
@@ -297,8 +470,7 @@ uint32_t readIndex(const tinygltf::Model &model,
     throw std::runtime_error("glTF indices accessor must be SCALAR");
   }
 
-  const unsigned char *data =
-      accessorData(model, accessor) + accessorStride(model, accessor) * index;
+  const unsigned char *data = accessorElementData(model, accessor, index);
 
   switch (accessor.componentType) {
   case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
@@ -309,6 +481,388 @@ uint32_t readIndex(const tinygltf::Model &model,
     return *reinterpret_cast<const uint32_t *>(data);
   default:
     throw std::runtime_error("unsupported glTF index component type");
+  }
+}
+
+uint32_t readUnsignedComponent(const unsigned char *data, int componentType,
+                               uint32_t componentIndex) {
+  switch (componentType) {
+  case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+    return reinterpret_cast<const uint8_t *>(data)[componentIndex];
+  case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+    return reinterpret_cast<const uint16_t *>(data)[componentIndex];
+  default:
+    throw std::runtime_error("unsupported unsigned glTF component type");
+  }
+}
+
+float normalizedComponentScale(int componentType) {
+  switch (componentType) {
+  case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+    return 255.0f;
+  case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+    return 65535.0f;
+  default:
+    throw std::runtime_error("unsupported normalized glTF component type");
+  }
+}
+
+glm::uvec4 readJointIndices(const tinygltf::Model &model,
+                            const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.type != TINYGLTF_TYPE_VEC4) {
+    throw std::runtime_error("glTF JOINTS_0 accessor must be VEC4");
+  }
+  if (accessor.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
+      accessor.componentType != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+    throw std::runtime_error(
+        "glTF JOINTS_0 accessor must use unsigned byte or unsigned short");
+  }
+
+  const unsigned char *data = accessorElementData(model, accessor, index);
+  return {
+      readUnsignedComponent(data, accessor.componentType, 0),
+      readUnsignedComponent(data, accessor.componentType, 1),
+      readUnsignedComponent(data, accessor.componentType, 2),
+      readUnsignedComponent(data, accessor.componentType, 3),
+  };
+}
+
+glm::vec4 readJointWeights(const tinygltf::Model &model,
+                           const tinygltf::Accessor &accessor, size_t index) {
+  if (accessor.type != TINYGLTF_TYPE_VEC4) {
+    throw std::runtime_error("glTF WEIGHTS_0 accessor must be VEC4");
+  }
+
+  glm::vec4 weights(0.0f);
+  const unsigned char *data = accessorElementData(model, accessor, index);
+
+  if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) {
+    const auto *values = reinterpret_cast<const float *>(data);
+    weights = {values[0], values[1], values[2], values[3]};
+  } else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
+             accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+    const float normalizedScale =
+        accessor.normalized ? normalizedComponentScale(accessor.componentType)
+                            : 1.0f;
+    for (uint32_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
+      weights[componentIndex] =
+          static_cast<float>(readUnsignedComponent(data, accessor.componentType,
+                                                   componentIndex)) /
+          normalizedScale;
+    }
+  } else {
+    throw std::runtime_error(
+        "glTF WEIGHTS_0 accessor must use float or normalized unsigned values");
+  }
+
+  const float sum = weights.x + weights.y + weights.z + weights.w;
+  if (sum <= 1e-6f) {
+    return {1.0f, 0.0f, 0.0f, 0.0f};
+  }
+
+  return weights / sum;
+}
+
+glm::quat normalizedQuatFromVec4(const glm::vec4 &value) {
+  glm::quat rotation(value.w, value.x, value.y, value.z);
+  if (glm::length(rotation) < 1e-6f) {
+    return glm::identity<glm::quat>();
+  }
+  return glm::normalize(rotation);
+}
+
+std::vector<glm::mat4> readMat4Accessor(const tinygltf::Model &model,
+                                        const tinygltf::Accessor &accessor) {
+  std::vector<glm::mat4> matrices;
+  matrices.reserve(accessor.count);
+
+  for (size_t index = 0; index < accessor.count; ++index) {
+    matrices.push_back(readMat4(model, accessor, index));
+  }
+
+  return matrices;
+}
+
+std::vector<float> readFloatAccessor(const tinygltf::Model &model,
+                                     const tinygltf::Accessor &accessor) {
+  std::vector<float> values;
+  values.reserve(accessor.count);
+
+  for (size_t index = 0; index < accessor.count; ++index) {
+    values.push_back(readScalarFloat(model, accessor, index));
+  }
+
+  return values;
+}
+
+std::vector<SkinData> buildSkins(const tinygltf::Model &model) {
+  std::vector<SkinData> skins;
+  skins.reserve(model.skins.size());
+
+  for (size_t skinIndex = 0; skinIndex < model.skins.size(); ++skinIndex) {
+    const auto &sourceSkin = model.skins[skinIndex];
+    SkinData skin;
+    skin.name = sourceSkin.name.empty() ? "Skin " + std::to_string(skinIndex)
+                                        : sourceSkin.name;
+    skin.skeletonRootNodeIndex = sourceSkin.skeleton;
+    skin.jointNodeIndices.assign(sourceSkin.joints.begin(),
+                                 sourceSkin.joints.end());
+
+    if (sourceSkin.inverseBindMatrices >= 0) {
+      skin.inverseBindMatrices = readMat4Accessor(
+          model, accessorAt(model, sourceSkin.inverseBindMatrices));
+    } else {
+      skin.inverseBindMatrices.resize(skin.jointNodeIndices.size(),
+                                      glm::mat4(1.0f));
+    }
+
+    if (skin.jointNodeIndices.size() != skin.inverseBindMatrices.size()) {
+      throw std::runtime_error(
+          "glTF skin joint count does not match inverse bind matrix count");
+    }
+
+    skins.push_back(std::move(skin));
+  }
+
+  return skins;
+}
+
+AnimationInterpolation mapInterpolation(const std::string &interpolation) {
+  if (interpolation.empty() || interpolation == "LINEAR") {
+    return AnimationInterpolation::Linear;
+  }
+  if (interpolation == "STEP") {
+    return AnimationInterpolation::Step;
+  }
+  if (interpolation == "CUBICSPLINE") {
+    return AnimationInterpolation::CubicSpline;
+  }
+
+  throw std::runtime_error("unsupported glTF animation interpolation: " +
+                           interpolation);
+}
+
+AnimationTargetPath mapTargetPath(const std::string &targetPath) {
+  if (targetPath == "translation") {
+    return AnimationTargetPath::Translation;
+  }
+  if (targetPath == "rotation") {
+    return AnimationTargetPath::Rotation;
+  }
+  if (targetPath == "scale") {
+    return AnimationTargetPath::Scale;
+  }
+
+  throw std::runtime_error("unsupported glTF animation target path: " +
+                           targetPath);
+}
+
+std::vector<AnimationClipData> buildAnimations(const tinygltf::Model &model) {
+  std::vector<AnimationClipData> animations;
+  animations.reserve(model.animations.size());
+
+  for (size_t animationIndex = 0; animationIndex < model.animations.size();
+       ++animationIndex) {
+    const auto &sourceAnimation = model.animations[animationIndex];
+    AnimationClipData clip;
+    clip.name = sourceAnimation.name.empty()
+                    ? "Animation " + std::to_string(animationIndex)
+                    : sourceAnimation.name;
+
+    for (const auto &channel : sourceAnimation.channels) {
+      if (channel.target_path == "weights") {
+        continue;
+      }
+
+      if (channel.target_node < 0 ||
+          static_cast<size_t>(channel.target_node) >= model.nodes.size()) {
+        throw std::runtime_error(
+            "glTF animation channel target node is invalid");
+      }
+      if (channel.sampler < 0 || static_cast<size_t>(channel.sampler) >=
+                                     sourceAnimation.samplers.size()) {
+        throw std::runtime_error("glTF animation channel sampler is invalid");
+      }
+
+      const auto &sampler =
+          sourceAnimation.samplers[static_cast<size_t>(channel.sampler)];
+      const auto &inputAccessor = accessorAt(model, sampler.input);
+      const auto &outputAccessor = accessorAt(model, sampler.output);
+
+      NodeAnimationTrack track;
+      track.targetNodeIndex = channel.target_node;
+      track.targetPath = mapTargetPath(channel.target_path);
+      track.interpolation = mapInterpolation(sampler.interpolation);
+      track.timesSeconds = readFloatAccessor(model, inputAccessor);
+
+      if (track.timesSeconds.empty()) {
+        throw std::runtime_error("glTF animation track has no keyframes");
+      }
+
+      const size_t keyframeCount = track.timesSeconds.size();
+      const size_t expectedOutputCount =
+          track.interpolation == AnimationInterpolation::CubicSpline
+              ? keyframeCount * 3
+              : keyframeCount;
+      if (outputAccessor.count != expectedOutputCount) {
+        throw std::runtime_error(
+            "glTF animation sampler output count does not match keyframes");
+      }
+
+      if (track.targetPath == AnimationTargetPath::Rotation) {
+        if (track.interpolation == AnimationInterpolation::CubicSpline) {
+          track.quatInTangents.reserve(keyframeCount);
+          track.quatValues.reserve(keyframeCount);
+          track.quatOutTangents.reserve(keyframeCount);
+          for (size_t keyframeIndex = 0; keyframeIndex < keyframeCount;
+               ++keyframeIndex) {
+            const size_t baseIndex = keyframeIndex * 3;
+            track.quatInTangents.push_back(
+                readVec4(model, outputAccessor, baseIndex));
+            track.quatValues.push_back(normalizedQuatFromVec4(
+                readVec4(model, outputAccessor, baseIndex + 1)));
+            track.quatOutTangents.push_back(
+                readVec4(model, outputAccessor, baseIndex + 2));
+          }
+        } else {
+          track.quatValues.reserve(keyframeCount);
+          for (size_t keyframeIndex = 0; keyframeIndex < keyframeCount;
+               ++keyframeIndex) {
+            track.quatValues.push_back(normalizedQuatFromVec4(
+                readVec4(model, outputAccessor, keyframeIndex)));
+          }
+        }
+      } else {
+        if (track.interpolation == AnimationInterpolation::CubicSpline) {
+          track.vec3InTangents.reserve(keyframeCount);
+          track.vec3Values.reserve(keyframeCount);
+          track.vec3OutTangents.reserve(keyframeCount);
+          for (size_t keyframeIndex = 0; keyframeIndex < keyframeCount;
+               ++keyframeIndex) {
+            const size_t baseIndex = keyframeIndex * 3;
+            track.vec3InTangents.push_back(
+                readVec3(model, outputAccessor, baseIndex));
+            track.vec3Values.push_back(
+                readVec3(model, outputAccessor, baseIndex + 1));
+            track.vec3OutTangents.push_back(
+                readVec3(model, outputAccessor, baseIndex + 2));
+          }
+        } else {
+          track.vec3Values.reserve(keyframeCount);
+          for (size_t keyframeIndex = 0; keyframeIndex < keyframeCount;
+               ++keyframeIndex) {
+            track.vec3Values.push_back(
+                readVec3(model, outputAccessor, keyframeIndex));
+          }
+        }
+      }
+
+      clip.durationSeconds =
+          std::max(clip.durationSeconds, track.timesSeconds.back());
+      clip.tracks.push_back(std::move(track));
+    }
+
+    animations.push_back(std::move(clip));
+  }
+
+  return animations;
+}
+
+void validateImportedSkeletonData(const SkeletonAssetData &data) {
+  for (size_t nodeIndex = 0; nodeIndex < data.nodes.size(); ++nodeIndex) {
+    const auto &node = data.nodes[nodeIndex];
+
+    if (node.parentIndex >= 0 &&
+        static_cast<size_t>(node.parentIndex) >= data.nodes.size()) {
+      throw std::runtime_error("skeleton node parent index is out of range");
+    }
+
+    for (const int childIndex : node.childIndices) {
+      if (childIndex < 0 ||
+          static_cast<size_t>(childIndex) >= data.nodes.size()) {
+        throw std::runtime_error("skeleton node child index is out of range");
+      }
+      if (data.nodes[static_cast<size_t>(childIndex)].parentIndex !=
+          static_cast<int>(nodeIndex)) {
+        throw std::runtime_error("skeleton node hierarchy parent-child "
+                                 "relationship is inconsistent");
+      }
+    }
+  }
+
+  for (const int rootIndex : data.sceneRootNodeIndices) {
+    if (rootIndex < 0 || static_cast<size_t>(rootIndex) >= data.nodes.size()) {
+      throw std::runtime_error("scene root node index is out of range");
+    }
+    if (data.nodes[static_cast<size_t>(rootIndex)].parentIndex != -1) {
+      throw std::runtime_error("scene root node must not have a parent");
+    }
+  }
+
+  for (const auto &skin : data.skins) {
+    if (skin.skeletonRootNodeIndex >= 0 &&
+        static_cast<size_t>(skin.skeletonRootNodeIndex) >= data.nodes.size()) {
+      throw std::runtime_error("skin skeleton root node index is out of range");
+    }
+    if (skin.jointNodeIndices.size() != skin.inverseBindMatrices.size()) {
+      throw std::runtime_error(
+          "skin joint count does not match inverse bind matrix count");
+    }
+    for (const int jointNodeIndex : skin.jointNodeIndices) {
+      if (jointNodeIndex < 0 ||
+          static_cast<size_t>(jointNodeIndex) >= data.nodes.size()) {
+        throw std::runtime_error("skin joint node index is out of range");
+      }
+    }
+  }
+
+  for (const auto &animation : data.animations) {
+    if (!std::isfinite(animation.durationSeconds) ||
+        animation.durationSeconds < 0.0f) {
+      throw std::runtime_error("animation duration is invalid");
+    }
+
+    for (const auto &track : animation.tracks) {
+      if (track.targetNodeIndex < 0 ||
+          static_cast<size_t>(track.targetNodeIndex) >= data.nodes.size()) {
+        throw std::runtime_error("animation track target node is out of range");
+      }
+      if (track.timesSeconds.empty()) {
+        throw std::runtime_error("animation track has no keyframes");
+      }
+      for (size_t keyframeIndex = 1; keyframeIndex < track.timesSeconds.size();
+           ++keyframeIndex) {
+        if (track.timesSeconds[keyframeIndex] <
+            track.timesSeconds[keyframeIndex - 1]) {
+          throw std::runtime_error("animation track keyframe times must be "
+                                   "monotonically increasing");
+        }
+      }
+
+      if (track.targetPath == AnimationTargetPath::Rotation) {
+        if (track.quatValues.size() != track.timesSeconds.size()) {
+          throw std::runtime_error(
+              "rotation track keyframe count does not match keyframe times");
+        }
+        if (track.interpolation == AnimationInterpolation::CubicSpline &&
+            (track.quatInTangents.size() != track.timesSeconds.size() ||
+             track.quatOutTangents.size() != track.timesSeconds.size())) {
+          throw std::runtime_error(
+              "rotation cubic spline tangents do not match keyframe times");
+        }
+      } else {
+        if (track.vec3Values.size() != track.timesSeconds.size()) {
+          throw std::runtime_error(
+              "vec3 track keyframe count does not match keyframe times");
+        }
+        if (track.interpolation == AnimationInterpolation::CubicSpline &&
+            (track.vec3InTangents.size() != track.timesSeconds.size() ||
+             track.vec3OutTangents.size() != track.timesSeconds.size())) {
+          throw std::runtime_error(
+              "vec3 cubic spline tangents do not match keyframe times");
+        }
+      }
+    }
   }
 }
 
@@ -327,6 +881,7 @@ std::string primitiveName(const tinygltf::Node &node,
 
 void GltfModelAsset::load(const std::string &path) {
   sourcePath = path;
+  skeletonData = {};
 
   tinygltf::TinyGLTF loader;
   tinygltf::Model model;
@@ -347,6 +902,12 @@ void GltfModelAsset::load(const std::string &path) {
   if (!loaded) {
     throw std::runtime_error("failed to load glTF: " + warn + err);
   }
+
+  skeletonData.nodes = buildSkeletonNodes(model);
+  skeletonData.sceneRootNodeIndices = collectSceneRootNodeIndices(model);
+  skeletonData.skins = buildSkins(model);
+  skeletonData.animations = buildAnimations(model);
+  validateImportedSkeletonData(skeletonData);
 
   std::vector<GeometryVertex> vertices;
   std::vector<uint32_t> indices;
@@ -375,6 +936,8 @@ void GltfModelAsset::load(const std::string &path) {
     const auto &positionAccessor = accessorAt(model, positionIt->second);
     const tinygltf::Accessor *normalAccessor = nullptr;
     const tinygltf::Accessor *uvAccessor = nullptr;
+    const tinygltf::Accessor *jointAccessor = nullptr;
+    const tinygltf::Accessor *weightAccessor = nullptr;
 
     if (const auto normalIt = primitive.attributes.find("NORMAL");
         normalIt != primitive.attributes.end()) {
@@ -383,6 +946,25 @@ void GltfModelAsset::load(const std::string &path) {
     if (const auto uvIt = primitive.attributes.find("TEXCOORD_0");
         uvIt != primitive.attributes.end()) {
       uvAccessor = &accessorAt(model, uvIt->second);
+    }
+    if (const auto jointIt = primitive.attributes.find("JOINTS_0");
+        jointIt != primitive.attributes.end()) {
+      jointAccessor = &accessorAt(model, jointIt->second);
+    }
+    if (const auto weightIt = primitive.attributes.find("WEIGHTS_0");
+        weightIt != primitive.attributes.end()) {
+      weightAccessor = &accessorAt(model, weightIt->second);
+    }
+
+    const int skinIndex = node.skin;
+    if (skinIndex >= 0 &&
+        static_cast<size_t>(skinIndex) >= skeletonData.skins.size()) {
+      throw std::runtime_error("glTF node skin index is out of range");
+    }
+    if (skinIndex >= 0 &&
+        (jointAccessor == nullptr || weightAccessor == nullptr)) {
+      throw std::runtime_error(
+          "skinned glTF primitive is missing JOINTS_0 or WEIGHTS_0");
     }
 
     std::vector<uint32_t> localToGlobal;
@@ -403,11 +985,33 @@ void GltfModelAsset::load(const std::string &path) {
       const glm::vec2 uv = uvAccessor == nullptr
                                ? glm::vec2(0.0f)
                                : readVec2(model, *uvAccessor, vertexIndex);
+      const glm::uvec4 jointIndices =
+          jointAccessor == nullptr
+              ? glm::uvec4(0, 0, 0, 0)
+              : readJointIndices(model, *jointAccessor, vertexIndex);
+      const glm::vec4 jointWeights =
+          weightAccessor == nullptr
+              ? glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)
+              : readJointWeights(model, *weightAccessor, vertexIndex);
+      if (skinIndex >= 0) {
+        const auto &skin = skeletonData.skins[static_cast<size_t>(skinIndex)];
+        for (uint32_t jointSlot = 0; jointSlot < 4; ++jointSlot) {
+          if (jointWeights[jointSlot] <= 0.0f) {
+            continue;
+          }
+          if (jointIndices[jointSlot] >= skin.jointNodeIndices.size()) {
+            throw std::runtime_error(
+                "glTF vertex joint index is out of range for the bound skin");
+          }
+        }
+      }
 
       GeometryVertex vertex{
           .pos = position,
           .normal = normal,
           .texCoord = uv,
+          .jointIndices = jointIndices,
+          .jointWeights = jointWeights,
       };
 
       const auto [it, inserted] = uniqueVertices.try_emplace(
@@ -423,8 +1027,10 @@ void GltfModelAsset::load(const std::string &path) {
         .indexOffset = static_cast<uint32_t>(indices.size()),
         .indexCount = 0,
         .materialIndex = primitive.material >= 0 ? primitive.material : -1,
-        .shapeIndex = static_cast<uint32_t>(nodeIndex),
+        .shapeIndex = nodeIndex >= 0 ? static_cast<uint32_t>(nodeIndex) : 0u,
         .transform = worldTransform,
+        .nodeIndex = nodeIndex,
+        .skinIndex = skinIndex,
     };
 
     if (primitive.indices >= 0) {
@@ -473,7 +1079,7 @@ void GltfModelAsset::load(const std::string &path) {
       syntheticNode.name = mesh.name;
       for (size_t primitiveIndex = 0; primitiveIndex < mesh.primitives.size();
            ++primitiveIndex) {
-        processPrimitive(syntheticNode, static_cast<int>(meshIndex), mesh,
+        processPrimitive(syntheticNode, -1, mesh,
                          mesh.primitives[primitiveIndex], primitiveIndex,
                          glm::mat4(1.0f));
       }

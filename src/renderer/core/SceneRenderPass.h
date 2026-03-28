@@ -15,8 +15,8 @@ protected:
     return renderItem.targetPass == nullptr || renderItem.targetPass == this;
   }
 
-  virtual void bindRenderItemResources(const RenderPassContext &context,
-                                       const RenderItem &renderItem) {
+  virtual void bindPrimaryRenderItemResources(const RenderPassContext &context,
+                                              const RenderItem &renderItem) {
     if (descriptorSetLayout() != nullptr &&
         renderItem.descriptorBindings != nullptr) {
       context.commandBuffer.bindDescriptorSets(
@@ -24,6 +24,24 @@ protected:
           *renderItem.descriptorBindings->descriptorSet(context.frameIndex),
           nullptr);
     }
+  }
+
+  virtual void bindSecondaryRenderItemResources(
+      const RenderPassContext &context, const RenderItem &renderItem) {
+    if (descriptorSetLayout(1) != nullptr &&
+        renderItem.secondaryDescriptorBindings != nullptr) {
+      context.commandBuffer.bindDescriptorSets(
+          vk::PipelineBindPoint::eGraphics, pipelineLayoutHandle(), 1,
+          *renderItem.secondaryDescriptorBindings->descriptorSet(
+              context.frameIndex),
+          nullptr);
+    }
+  }
+
+  virtual void bindRenderItemResources(const RenderPassContext &context,
+                                       const RenderItem &renderItem) {
+    bindPrimaryRenderItemResources(context, renderItem);
+    bindSecondaryRenderItemResources(context, renderItem);
   }
 
   virtual void drawRenderItem(const RenderPassContext &context,

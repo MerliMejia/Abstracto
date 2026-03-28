@@ -111,6 +111,8 @@ struct ModelSubmesh {
   int materialIndex = -1;
   uint32_t shapeIndex = 0;
   glm::mat4 transform{1.0f};
+  int nodeIndex = -1;
+  int skinIndex = -1;
 };
 
 using ObjSubmesh = ModelSubmesh;
@@ -510,12 +512,14 @@ struct GeometryVertex {
   glm::vec3 normal;
   glm::vec2 texCoord;
   glm::vec4 tangent = {1.0f, 0.0f, 0.0f, 1.0f};
+  glm::uvec4 jointIndices{0, 0, 0, 0};
+  glm::vec4 jointWeights{1.0f, 0.0f, 0.0f, 0.0f};
 
   static vk::VertexInputBindingDescription getBindingDescription() {
     return {0, sizeof(GeometryVertex), vk::VertexInputRate::eVertex};
   }
 
-  static std::array<vk::VertexInputAttributeDescription, 4>
+  static std::array<vk::VertexInputAttributeDescription, 6>
   getAttributeDescriptions() {
     return {
         vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,
@@ -526,21 +530,39 @@ struct GeometryVertex {
                                             offsetof(GeometryVertex, texCoord)),
         vk::VertexInputAttributeDescription(3, 0,
                                             vk::Format::eR32G32B32A32Sfloat,
-                                            offsetof(GeometryVertex, tangent))};
+                                            offsetof(GeometryVertex, tangent)),
+        vk::VertexInputAttributeDescription(4, 0,
+                                            vk::Format::eR32G32B32A32Uint,
+                                            offsetof(GeometryVertex,
+                                                     jointIndices)),
+        vk::VertexInputAttributeDescription(5, 0,
+                                            vk::Format::eR32G32B32A32Sfloat,
+                                            offsetof(GeometryVertex,
+                                                     jointWeights))};
   }
 
   bool operator==(const GeometryVertex &other) const {
     return pos == other.pos && normal == other.normal &&
-           texCoord == other.texCoord;
+           texCoord == other.texCoord && tangent == other.tangent &&
+           jointIndices == other.jointIndices &&
+           jointWeights == other.jointWeights;
   }
 };
 
 template <> struct std::hash<GeometryVertex> {
   size_t operator()(GeometryVertex const &vertex) const noexcept {
-    return ((hash<glm::vec3>()(vertex.pos) ^
-             (hash<glm::vec3>()(vertex.normal) << 1)) >>
-            1) ^
-           (hash<glm::vec2>()(vertex.texCoord) << 1);
+    size_t seed = hash<glm::vec3>()(vertex.pos);
+    seed ^= hash<glm::vec3>()(vertex.normal) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::vec2>()(vertex.texCoord) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::vec4>()(vertex.tangent) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::uvec4>()(vertex.jointIndices) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::vec4>()(vertex.jointWeights) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    return seed;
   }
 };
 

@@ -159,6 +159,11 @@ public:
     return hasDescriptorSetLayout() ? &descriptorSetLayoutHandle : nullptr;
   }
 
+  vk::raii::DescriptorSetLayout *descriptorSetLayout(uint32_t setIndex) override {
+    return hasDescriptorSetLayout(setIndex) ? &passDescriptorSetLayout(setIndex)
+                                            : nullptr;
+  }
+
   uint32_t colorOutputCount() const {
     if (usesExplicitColorAttachments()) {
       return static_cast<uint32_t>(attachments.colorAttachments.size());

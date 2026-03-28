@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/assets/SkeletonTypes.h"
 #include "renderer/resources/Mesh.h"
 
 class ModelAsset {
@@ -12,4 +13,5 @@ public:
   virtual const std::vector<ModelMaterialData> &materials() const = 0;
   virtual const std::vector<ModelSubmesh> &submeshes() const = 0;
   virtual const std::string &path() const = 0;
+  virtual const SkeletonAssetData *skeletonAsset() const { return nullptr; }
 };

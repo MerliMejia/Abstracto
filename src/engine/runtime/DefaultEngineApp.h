@@ -79,6 +79,8 @@ private:
   TypedMesh<Vertex> pointLightMarkerMesh;
   TypedMesh<Vertex> spotLightMarkerMesh;
   TypedMesh<Vertex> directionalLightMarkerMesh;
+  TypedMesh<Vertex> boneSegmentMesh;
+  TypedMesh<Vertex> boneJointMarkerMesh;
   FrameGeometryUniforms frameGeometryUniforms;
   Sampler sampler;
   ImageBasedLighting imageBasedLighting;
@@ -148,8 +150,18 @@ private:
     return *geometryPass->descriptorSetLayout();
   }
 
+  vk::raii::DescriptorSetLayout *sceneSecondaryDescriptorSetLayout() {
+    return geometryPass == nullptr ? nullptr : geometryPass->descriptorSetLayout(1);
+  }
+
   std::filesystem::path debugSessionPath() const {
     return resolvedDebugSessionPath(engineConfig);
+  }
+
+  void applyEngineConfigOverrides(DefaultDebugUISettings &settings) const {
+    if (engineConfig.skyboxVisible.has_value()) {
+      settings.skyboxVisible = *engineConfig.skyboxVisible;
+    }
   }
 
   std::vector<SceneAssetInstance> resolvedSceneAssets() const {
@@ -242,6 +254,7 @@ private:
     if (sceneDefinition.configureSettings) {
       sceneDefinition.configureSettings(settings);
     }
+    applyEngineConfigOverrides(settings);
     clampSceneObjectSelection(settings);
     return settings;
   }
@@ -280,6 +293,162 @@ private:
         tonemapPass, debugPresentPass);
   }
 
+  static glm::vec3 debugPositionFromMatrix(const glm::mat4 &matrix) {
+    return glm::vec3(matrix[3]);
+  }
+
+  static glm::vec3 safeDebugDirection(const glm::vec3 &direction,
+                                      const glm::vec3 &fallback) {
+    const float lengthSquared = glm::dot(direction, direction);
+    return glm::normalize(lengthSquared > 1e-6f ? direction : fallback);
+  }
+
+  static glm::mat4 debugOrientationTransform(const glm::vec3 &position,
+                                             const glm::vec3 &direction,
+                                             float scaleX, float scaleY,
+                                             float scaleZ) {
+    const glm::vec3 forward =
+        safeDebugDirection(direction, glm::vec3(0.0f, 0.0f, 1.0f));
+    const glm::vec3 worldUp =
+        std::abs(glm::dot(forward, glm::vec3(0.0f, 0.0f, 1.0f))) > 0.98f
+            ? glm::vec3(0.0f, 1.0f, 0.0f)
+            : glm::vec3(0.0f, 0.0f, 1.0f);
+    const glm::vec3 right = glm::normalize(glm::cross(worldUp, forward));
+    const glm::vec3 up = glm::normalize(glm::cross(forward, right));
+
+    glm::mat4 transform(1.0f);
+    transform[0] = glm::vec4(right * scaleX, 0.0f);
+    transform[1] = glm::vec4(up * scaleY, 0.0f);
+    transform[2] = glm::vec4(forward * scaleZ, 0.0f);
+    transform[3] = glm::vec4(position, 1.0f);
+    return transform;
+  }
+
+  static glm::vec4 boneDebugColor(const SkeletonAssetData &skeleton,
+                                  int nodeIndex, int selectedBoneIndex) {
+    if (nodeIndex == selectedBoneIndex) {
+      return {1.0f, 0.66f, 0.12f, 1.0f};
+    }
+    if (selectedBoneIndex >= 0 &&
+        static_cast<size_t>(selectedBoneIndex) < skeleton.nodes.size()) {
+      const SkeletonNode &selectedNode =
+          skeleton.nodes[static_cast<size_t>(selectedBoneIndex)];
+      if (selectedNode.parentIndex == nodeIndex) {
+        return {0.98f, 0.28f, 0.68f, 1.0f};
+      }
+      if (std::find(selectedNode.childIndices.begin(),
+                    selectedNode.childIndices.end(),
+                    nodeIndex) != selectedNode.childIndices.end()) {
+        return {0.48f, 1.0f, 0.34f, 1.0f};
+      }
+    }
+    return {0.18f, 0.86f, 1.0f, 1.0f};
+  }
+
+  void updateBoneOverlay() {
+    if (debugOverlayPass == nullptr) {
+      return;
+    }
+
+    std::vector<DebugOverlayInstance> boneSegments;
+    std::vector<DebugOverlayInstance> boneMarkers;
+
+    if (debugUiSettings.bonesVisible) {
+      const size_t objectCount =
+          std::min(sceneAssetModels.size(), debugUiSettings.sceneObjects.size());
+      for (size_t objectIndex = 0; objectIndex < objectCount; ++objectIndex) {
+        if (!debugUiSettings.sceneObjects[objectIndex].visible) {
+          continue;
+        }
+
+        const RenderableModel &model = sceneAssetModels[objectIndex];
+        const ModelAsset *asset = model.modelAsset();
+        const SkeletonPose *pose = model.currentSkeletonPose();
+        const SkeletonAssetData *skeleton =
+            asset == nullptr ? nullptr : asset->skeletonAsset();
+        if (asset == nullptr || pose == nullptr || skeleton == nullptr ||
+            skeleton->nodes.empty()) {
+          continue;
+        }
+
+        std::vector<bool> deformingNodes(skeleton->nodes.size(), false);
+        for (const auto &submesh : asset->submeshes()) {
+          if (submesh.skinIndex < 0 ||
+              static_cast<size_t>(submesh.skinIndex) >= skeleton->skins.size()) {
+            continue;
+          }
+          for (const int jointNodeIndex :
+               skeleton->skins[static_cast<size_t>(submesh.skinIndex)]
+                   .jointNodeIndices) {
+            if (jointNodeIndex >= 0 &&
+                static_cast<size_t>(jointNodeIndex) < deformingNodes.size()) {
+              deformingNodes[static_cast<size_t>(jointNodeIndex)] = true;
+            }
+          }
+        }
+
+        const glm::mat4 objectMatrix = AppSceneController::sceneTransformMatrix(
+            debugUiSettings.sceneObjects[objectIndex].transform);
+        const int selectedBoneIndex =
+            static_cast<int>(objectIndex) == debugUiSettings.selectedObjectIndex
+                ? debugUiSettings.selectedBoneIndex
+                : -1;
+
+        for (size_t nodeIndex = 0; nodeIndex < skeleton->nodes.size();
+             ++nodeIndex) {
+          if (!deformingNodes[nodeIndex]) {
+            continue;
+          }
+
+          const glm::mat4 worldMatrix =
+              objectMatrix * pose->worldTransform(nodeIndex);
+          const glm::vec3 jointPosition = debugPositionFromMatrix(worldMatrix);
+          const glm::vec4 color = boneDebugColor(
+              *skeleton, static_cast<int>(nodeIndex), selectedBoneIndex);
+          const float jointScale =
+              debugUiSettings.boneMarkerScale *
+              (static_cast<int>(nodeIndex) == selectedBoneIndex ? 1.45f : 1.0f);
+
+          boneMarkers.push_back(DebugOverlayInstance{
+              .model = glm::translate(glm::mat4(1.0f), jointPosition) *
+                       glm::scale(glm::mat4(1.0f), glm::vec3(jointScale)),
+              .color = color,
+          });
+
+          const int parentIndex =
+              skeleton->nodes[nodeIndex].parentIndex;
+          if (parentIndex < 0 ||
+              static_cast<size_t>(parentIndex) >= deformingNodes.size() ||
+              !deformingNodes[static_cast<size_t>(parentIndex)]) {
+            continue;
+          }
+
+          const glm::vec3 parentPosition = debugPositionFromMatrix(
+              objectMatrix * pose->worldTransform(parentIndex));
+          const glm::vec3 direction = jointPosition - parentPosition;
+          const float length = glm::length(direction);
+          if (length <= 1e-5f) {
+            continue;
+          }
+
+          const float segmentRadius = std::max(
+              debugUiSettings.boneMarkerScale * 0.8f, length * 0.045f);
+
+          boneSegments.push_back(DebugOverlayInstance{
+              .model = debugOrientationTransform(
+                  parentPosition, direction, segmentRadius, segmentRadius,
+                  length),
+              .color = color,
+          });
+        }
+      }
+    }
+
+    debugOverlayPass->setBonesVisible(debugUiSettings.bonesVisible);
+    debugOverlayPass->setBoneSegments(std::move(boneSegments));
+    debugOverlayPass->setBoneMarkers(std::move(boneMarkers));
+  }
+
   void reloadSceneAssets() {
     backend.waitIdle();
     sceneAssets = resolvedSceneAssets();
@@ -292,8 +461,14 @@ private:
       }
       sceneAssetModels[index].loadFromFile(
           sceneAssets[index].assetPath, commandContext(), deviceContext(),
-          sceneDescriptorSetLayout(), frameGeometryUniforms, sampler,
+          sceneDescriptorSetLayout(), sceneSecondaryDescriptorSetLayout(),
+          frameGeometryUniforms, sampler,
           DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT);
+      if (engineConfig.onSceneAssetLoaded != nullptr &&
+          sceneAssetModels[index].modelAsset() != nullptr) {
+        engineConfig.onSceneAssetLoaded(
+            sceneAssets[index], *sceneAssetModels[index].modelAsset());
+      }
     }
     syncSceneObjectsWithAssets();
     rebuildSceneRenderItems();
@@ -306,6 +481,7 @@ private:
 
     try {
       DebugSessionIO::loadDebugSession(debugSessionPath(), debugUiSettings);
+      applyEngineConfigOverrides(debugUiSettings);
       ensureDefaultEnvironmentPath();
     } catch (const std::exception &e) {
       std::cerr << "Failed to load debug session: " << e.what() << std::endl;
@@ -364,6 +540,14 @@ private:
     directionalLightMarkerMesh.createIndexBuffer(commandContext(),
                                                  deviceContext());
 
+    boneSegmentMesh = buildBoneSegmentMesh();
+    boneSegmentMesh.createVertexBuffer(commandContext(), deviceContext());
+    boneSegmentMesh.createIndexBuffer(commandContext(), deviceContext());
+
+    boneJointMarkerMesh = buildBoneJointMarkerMesh();
+    boneJointMarkerMesh.createVertexBuffer(commandContext(), deviceContext());
+    boneJointMarkerMesh.createIndexBuffer(commandContext(), deviceContext());
+
     if (debugUiSettings.syncSkySunToLight) {
       syncProceduralSkySunWithLight();
     }
@@ -374,8 +558,8 @@ private:
         debugOverlayPass, imguiPass, window, backend.instance(),
         commandContext(), debugUiSettings, imageBasedLighting,
         directionalShadowPass, spotShadowPasses, pointLightMarkerMesh,
-        spotLightMarkerMesh, directionalLightMarkerMesh,
-        debugUiSettings.sceneLights,
+        spotLightMarkerMesh, directionalLightMarkerMesh, boneSegmentMesh,
+        boneJointMarkerMesh, debugUiSettings.sceneLights,
         AppSceneController::sceneObjectsAnchor(debugUiSettings),
         DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT, DEFAULT_ENGINE_CAMERA_NEAR_PLANE,
         engineConfig.rendererAssetPath);
@@ -442,7 +626,7 @@ private:
       if (debugUiVisible) {
         RenderableModel &editorModel = currentEditorModel();
         DefaultDebugUI defaultDebugUi = DefaultDebugUI::create(
-            editorModel, debugUiSettings,
+            editorModel, sceneAssetModels, debugUiSettings,
             DefaultDebugUICallbacks{
                 .syncProceduralSkySunWithLight =
                     [this]() { syncProceduralSkySunWithLight(); },
@@ -492,7 +676,13 @@ private:
     DefaultDebugCameraController cameraController =
         DefaultDebugCameraController::create(debugUiSettings);
     cameraController.update(deltaSeconds, window.handle());
+    for (auto &sceneAssetModel : sceneAssetModels) {
+      sceneAssetModel.updateAnimationPlayback(deltaSeconds);
+    }
     rebuildSceneRenderItems();
+    for (auto &sceneAssetModel : sceneAssetModels) {
+      sceneAssetModel.updateSkinPalettes(frameState->frameIndex);
+    }
 
     GeometryUniformData geometryUniformData{};
     geometryUniformData.model = glm::mat4(1.0f);
@@ -544,6 +734,7 @@ private:
       debugOverlayPass->setDirectionalAnchor(
           AppSceneController::sceneObjectsAnchor(debugUiSettings));
     }
+    updateBoneOverlay();
     if (tonemapPass != nullptr) {
       const glm::vec3 lightRadiance = estimatedSceneLightRadiance();
       const float lightLuminance =

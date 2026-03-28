@@ -18,12 +18,16 @@ class RenderPass;
 
 struct RenderItem {
   Mesh *mesh = nullptr;
-  DescriptorBindings *descriptorBindings = nullptr;
+  FrameDescriptorBindings *descriptorBindings = nullptr;
+  FrameDescriptorBindings *secondaryDescriptorBindings = nullptr;
   const RenderPass *targetPass = nullptr;
   uint32_t indexOffset = 0;
   uint32_t indexCount = 0;
   glm::mat4 modelMatrix{1.0f};
   glm::mat4 modelNormalMatrix{1.0f};
+  int boneWeightJointIndex = -1;
+  int boneWeightDebugEnabled = 0;
+  int skinningEnabled = 0;
 };
 
 struct RenderPassContext {
@@ -45,5 +49,8 @@ public:
                       const std::vector<RenderItem> &renderItems) = 0;
   virtual vk::raii::DescriptorSetLayout *descriptorSetLayout() {
     return nullptr;
+  }
+  virtual vk::raii::DescriptorSetLayout *descriptorSetLayout(uint32_t setIndex) {
+    return setIndex == 0 ? descriptorSetLayout() : nullptr;
   }
 };

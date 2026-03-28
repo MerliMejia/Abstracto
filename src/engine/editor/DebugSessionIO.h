@@ -195,10 +195,16 @@ inline json settingsToJson(const DefaultDebugUISettings &settings) {
       {"selectedMaterialIndex", settings.selectedMaterialIndex},
       {"selectedObjectIndex", settings.selectedObjectIndex},
       {"selectedLightIndex", settings.selectedLightIndex},
+      {"selectedBoneIndex", settings.selectedBoneIndex},
+      {"selectedAnimationObjectIndex", settings.selectedAnimationObjectIndex},
+      {"selectedAnimationIndex", settings.selectedAnimationIndex},
       {"sceneObjects", sceneObjects},
       {"sceneLights", sceneLights},
       {"lightMarkersVisible", settings.lightMarkersVisible},
       {"lightMarkerScale", settings.lightMarkerScale},
+      {"bonesVisible", settings.bonesVisible},
+      {"boneMarkerScale", settings.boneMarkerScale},
+      {"showBoneWeights", settings.showBoneWeights},
       {"shadowsEnabled", settings.shadowsEnabled},
       {"directionalShadowExtent", settings.directionalShadowExtent},
       {"directionalShadowNearPlane", settings.directionalShadowNearPlane},
@@ -251,6 +257,12 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       value.value("selectedObjectIndex", settings.selectedObjectIndex);
   settings.selectedLightIndex =
       value.value("selectedLightIndex", settings.selectedLightIndex);
+  settings.selectedBoneIndex =
+      value.value("selectedBoneIndex", settings.selectedBoneIndex);
+  settings.selectedAnimationObjectIndex = value.value(
+      "selectedAnimationObjectIndex", settings.selectedAnimationObjectIndex);
+  settings.selectedAnimationIndex =
+      value.value("selectedAnimationIndex", settings.selectedAnimationIndex);
 
   settings.sceneObjects.clear();
   const bool hasSceneObjectsArray =
@@ -292,6 +304,11 @@ inline DefaultDebugUISettings settingsFromJson(const json &value) {
       value.value("lightMarkersVisible", settings.lightMarkersVisible);
   settings.lightMarkerScale = std::max(
       value.value("lightMarkerScale", settings.lightMarkerScale), 0.01f);
+  settings.bonesVisible = value.value("bonesVisible", settings.bonesVisible);
+  settings.boneMarkerScale = std::max(
+      value.value("boneMarkerScale", settings.boneMarkerScale), 0.005f);
+  settings.showBoneWeights =
+      value.value("showBoneWeights", settings.showBoneWeights);
   settings.shadowsEnabled =
       value.value("shadowsEnabled", settings.shadowsEnabled);
   settings.directionalShadowExtent = std::max(

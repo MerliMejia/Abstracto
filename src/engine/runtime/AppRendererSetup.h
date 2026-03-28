@@ -59,7 +59,8 @@ public:
       ImageBasedLighting &imageBasedLighting, ShadowPass *directionalShadowPass,
       const std::array<ShadowPass *, SpotShadowPassCount> &spotShadowPasses,
       Mesh &pointLightMarkerMesh, Mesh &spotLightMarkerMesh,
-      Mesh &directionalLightMarkerMesh, const SceneLightSet &sceneLights,
+      Mesh &directionalLightMarkerMesh, Mesh &boneSegmentMesh,
+      Mesh &boneJointMesh, const SceneLightSet &sceneLights,
       const glm::vec3 &directionalAnchor, uint32_t maxFramesInFlight,
       float cameraNearPlane, const std::string &rendererAssetPath) {
     static_assert(SpotShadowPassCount == MAX_DEBUG_SPOT_SHADOW_MAPS,
@@ -122,8 +123,11 @@ public:
     debugOverlayPass->setPointMarkerMesh(pointLightMarkerMesh);
     debugOverlayPass->setSpotMarkerMesh(spotLightMarkerMesh);
     debugOverlayPass->setDirectionalMarkerMesh(directionalLightMarkerMesh);
+    debugOverlayPass->setBoneSegmentMesh(boneSegmentMesh);
+    debugOverlayPass->setBoneJointMesh(boneJointMesh);
     debugOverlayPass->setMarkersVisible(settings.lightMarkersVisible);
     debugOverlayPass->setMarkerScale(settings.lightMarkerScale);
+    debugOverlayPass->setBonesVisible(settings.bonesVisible);
     debugOverlayPass->setDirectionalAnchor(directionalAnchor);
     renderer.addPass(std::move(debugOverlayPassLocal));
 

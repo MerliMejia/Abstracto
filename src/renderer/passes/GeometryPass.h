@@ -7,6 +7,10 @@
 struct GeometryPassPushConstant {
   glm::mat4 model{1.0f};
   glm::mat4 modelNormal{1.0f};
+  int boneWeightJointIndex = -1;
+  int boneWeightDebugEnabled = 0;
+  int skinningEnabled = 0;
+  int debugPadding = 0;
 };
 
 class GeometryPass : public SceneRenderPass {
@@ -49,6 +53,15 @@ protected:
              .descriptorCount = 1,
              .stageFlags = vk::ShaderStageFlagBits::eFragment}};
   }
+
+  std::vector<DescriptorBindingSpec> secondaryDescriptorBindings() const override {
+    return {{
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+    }};
+  }
   VertexInputLayoutSpec vertexInputLayout() const override {
     auto attrs = GeometryVertex::getAttributeDescriptions();
     return VertexInputLayoutSpec{
@@ -71,6 +84,9 @@ protected:
     GeometryPassPushConstant push{
         .model = renderItem.modelMatrix,
         .modelNormal = renderItem.modelNormalMatrix,
+        .boneWeightJointIndex = renderItem.boneWeightJointIndex,
+        .boneWeightDebugEnabled = renderItem.boneWeightDebugEnabled,
+        .skinningEnabled = renderItem.skinningEnabled,
     };
     context.commandBuffer.pushConstants<GeometryPassPushConstant>(
         *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});
