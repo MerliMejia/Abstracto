@@ -31,7 +31,7 @@ public:
       }
 
       const auto uniformLightIndex =
-          pbrPass->uniformLightIndexForSceneLight(sceneLightIndex);
+          pbrPass->uniformLightIndexForSource(sceneLightIndex);
       if (!uniformLightIndex.has_value()) {
         continue;
       }
@@ -90,7 +90,7 @@ public:
       }
 
       const auto uniformLightIndex =
-          pbrPass->uniformLightIndexForSceneLight(sceneLightIndex);
+          pbrPass->uniformLightIndexForSource(sceneLightIndex);
       if (!uniformLightIndex.has_value()) {
         continue;
       }

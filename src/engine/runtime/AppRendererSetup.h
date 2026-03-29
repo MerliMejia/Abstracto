@@ -60,9 +60,8 @@ public:
       const std::array<ShadowPass *, SpotShadowPassCount> &spotShadowPasses,
       Mesh &pointLightMarkerMesh, Mesh &spotLightMarkerMesh,
       Mesh &directionalLightMarkerMesh, Mesh &boneSegmentMesh,
-      Mesh &boneJointMesh, const SceneLightSet &sceneLights,
-      const glm::vec3 &directionalAnchor, uint32_t maxFramesInFlight,
-      float cameraNearPlane, const std::string &rendererAssetPath) {
+      Mesh &boneJointMesh, uint32_t maxFramesInFlight, float cameraNearPlane,
+      const std::string &rendererAssetPath) {
     static_assert(SpotShadowPassCount == MAX_DEBUG_SPOT_SHADOW_MAPS,
                   "DebugPresentPass expects all spot shadow slots");
 
@@ -118,7 +117,7 @@ public:
                      .enableDepthTest = false,
                      .enableDepthWrite = false,
                      .enableBlending = true},
-        maxFramesInFlight, &sceneLights);
+        maxFramesInFlight);
     debugOverlayPass = debugOverlayPassLocal.get();
     debugOverlayPass->setPointMarkerMesh(pointLightMarkerMesh);
     debugOverlayPass->setSpotMarkerMesh(spotLightMarkerMesh);
@@ -128,7 +127,6 @@ public:
     debugOverlayPass->setMarkersVisible(settings.lightMarkersVisible);
     debugOverlayPass->setMarkerScale(settings.lightMarkerScale);
     debugOverlayPass->setBonesVisible(settings.bonesVisible);
-    debugOverlayPass->setDirectionalAnchor(directionalAnchor);
     renderer.addPass(std::move(debugOverlayPassLocal));
 
     auto imguiPassLocal =

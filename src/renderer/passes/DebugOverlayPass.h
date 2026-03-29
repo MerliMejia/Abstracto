@@ -1,11 +1,11 @@
 #pragma once
 
 #include "renderer/resources/Mesh.h"
-#include "engine/scene/SceneLightSet.h"
 #include "renderer/core/PassUniformSet.h"
 #include "renderer/core/RasterRenderPass.h"
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 struct DebugOverlayFrameUniformData {
   glm::mat4 view{1.0f};
@@ -22,10 +22,22 @@ struct DebugOverlayInstance {
   glm::vec4 color{1.0f};
 };
 
+enum class DebugOverlayMarkerType : uint32_t {
+  Directional = 0,
+  Point = 1,
+  Spot = 2,
+};
+
+struct DebugOverlayMarker {
+  DebugOverlayMarkerType type = DebugOverlayMarkerType::Point;
+  glm::vec3 position{0.0f, 0.0f, 0.0f};
+  glm::vec3 direction{0.0f, 0.0f, 1.0f};
+  glm::vec4 color{1.0f};
+};
+
 class DebugOverlayPass : public RasterRenderPass {
 public:
-  DebugOverlayPass(PipelineSpec spec, uint32_t framesInFlight,
-                   const SceneLightSet *sceneLights = nullptr)
+  DebugOverlayPass(PipelineSpec spec, uint32_t framesInFlight)
       : RasterRenderPass(std::move(spec),
                          RasterPassAttachmentConfig{
                              .useColorAttachment = true,
@@ -35,11 +47,7 @@ public:
                              .useSwapchainColorAttachment = true,
                              .colorLoadOp = vk::AttachmentLoadOp::eLoad,
                          }),
-        framesInFlightCount(framesInFlight), sceneLightsRef(sceneLights) {}
-
-  void setSceneLights(const SceneLightSet &sceneLights) {
-    sceneLightsRef = &sceneLights;
-  }
+        framesInFlightCount(framesInFlight) {}
 
   void setCamera(const glm::mat4 &view, const glm::mat4 &proj) {
     frameUniform.view = view;
@@ -61,8 +69,8 @@ public:
   void setBoneMarkers(std::vector<DebugOverlayInstance> instances) {
     boneMarkers = std::move(instances);
   }
-  void setDirectionalAnchor(const glm::vec3 &anchor) {
-    directionalAnchor = anchor;
+  void setLightMarkers(std::vector<DebugOverlayMarker> markers) {
+    lightMarkers = std::move(markers);
   }
 
 protected:
@@ -100,44 +108,35 @@ protected:
 
   void recordDrawCommands(const RenderPassContext &context,
                           const std::vector<RenderItem> &) override {
-    if (!markersVisible || sceneLightsRef == nullptr) {
-      return;
-    }
-
-    for (const auto &light : sceneLightsRef->lights()) {
-      if (!light.enabled) {
-        continue;
-      }
-
-      switch (light.type) {
-      case SceneLightType::Directional:
-        if (directionalMarkerMesh != nullptr) {
-          const glm::vec3 direction =
-              safeDirection(light.direction, glm::vec3(-0.55f, -0.25f, -1.0f));
-          const glm::vec3 position =
-              directionalAnchor - direction * markerScale * 1.5f;
-          drawMarker(
-              context, *directionalMarkerMesh,
-              buildOrientationTransform(position, direction, markerScale),
-              glm::vec4(light.color, 1.0f));
+    if (markersVisible) {
+      for (const auto &marker : lightMarkers) {
+        switch (marker.type) {
+        case DebugOverlayMarkerType::Directional:
+          if (directionalMarkerMesh != nullptr) {
+            drawMarker(
+                context, *directionalMarkerMesh,
+                buildOrientationTransform(marker.position, marker.direction,
+                                          markerScale),
+                marker.color);
+          }
+          break;
+        case DebugOverlayMarkerType::Point:
+          if (pointMarkerMesh != nullptr) {
+            drawMarker(context, *pointMarkerMesh,
+                       glm::translate(glm::mat4(1.0f), marker.position) *
+                           glm::scale(glm::mat4(1.0f), glm::vec3(markerScale)),
+                       marker.color);
+          }
+          break;
+        case DebugOverlayMarkerType::Spot:
+          if (spotMarkerMesh != nullptr) {
+            drawMarker(context, *spotMarkerMesh,
+                       buildOrientationTransform(marker.position,
+                                                 marker.direction, markerScale),
+                       marker.color);
+          }
+          break;
         }
-        break;
-      case SceneLightType::Point:
-        if (pointMarkerMesh != nullptr) {
-          drawMarker(context, *pointMarkerMesh,
-                     glm::translate(glm::mat4(1.0f), light.position) *
-                         glm::scale(glm::mat4(1.0f), glm::vec3(markerScale)),
-                     glm::vec4(light.color, 1.0f));
-        }
-        break;
-      case SceneLightType::Spot:
-        if (spotMarkerMesh != nullptr) {
-          drawMarker(context, *spotMarkerMesh,
-                     buildOrientationTransform(light.position, light.direction,
-                                               markerScale),
-                     glm::vec4(light.color, 1.0f));
-        }
-        break;
       }
     }
 
@@ -162,7 +161,6 @@ private:
   uint32_t framesInFlightCount = 0;
   PassUniformSet<DebugOverlayFrameUniformData> frameUniformSet;
   DebugOverlayFrameUniformData frameUniform{};
-  const SceneLightSet *sceneLightsRef = nullptr;
   Mesh *pointMarkerMesh = nullptr;
   Mesh *spotMarkerMesh = nullptr;
   Mesh *directionalMarkerMesh = nullptr;
@@ -171,7 +169,7 @@ private:
   bool markersVisible = true;
   float markerScale = 0.35f;
   bool bonesVisible = true;
-  glm::vec3 directionalAnchor{0.0f, 0.0f, 0.0f};
+  std::vector<DebugOverlayMarker> lightMarkers;
   std::vector<DebugOverlayInstance> boneSegments;
   std::vector<DebugOverlayInstance> boneMarkers;
 

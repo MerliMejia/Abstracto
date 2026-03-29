@@ -3,6 +3,8 @@
 #include "AppPerformanceStats.h"
 #include "AppRendererSetup.h"
 #include "DefaultEngineConfig.h"
+#include "RendererSceneAdapters.h"
+#include "SceneRenderItemBuilder.h"
 #include "ShadowSystem.h"
 #include "engine/assets/RenderableModel.h"
 #include "engine/editor/DebugSessionIO.h"
@@ -287,7 +289,7 @@ private:
   }
 
   void rebuildSceneRenderItems() {
-    AppSceneController::rebuildRenderItems(
+    SceneRenderItemBuilder::rebuild(
         renderItems, sceneAssetModels, debugUiSettings, geometryPass,
         directionalShadowPass, spotShadowPasses, lightQuad, pbrPass,
         tonemapPass, debugPresentPass);
@@ -559,10 +561,8 @@ private:
         commandContext(), debugUiSettings, imageBasedLighting,
         directionalShadowPass, spotShadowPasses, pointLightMarkerMesh,
         spotLightMarkerMesh, directionalLightMarkerMesh, boneSegmentMesh,
-        boneJointMarkerMesh, debugUiSettings.sceneLights,
-        AppSceneController::sceneObjectsAnchor(debugUiSettings),
-        DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT, DEFAULT_ENGINE_CAMERA_NEAR_PLANE,
-        engineConfig.rendererAssetPath);
+        boneJointMarkerMesh, DEFAULT_ENGINE_MAX_FRAMES_IN_FLIGHT,
+        DEFAULT_ENGINE_CAMERA_NEAR_PLANE, engineConfig.rendererAssetPath);
 
     renderer.initialize(deviceContext(), swapchainContext());
 
@@ -706,7 +706,8 @@ private:
 
     if (pbrPass != nullptr) {
       pbrPass->setCamera(geometryUniformData.proj, geometryUniformData.view);
-      pbrPass->setSceneLights(debugUiSettings.sceneLights);
+      pbrPass->setLights(
+          RendererSceneAdapters::buildPbrLightInputs(debugUiSettings.sceneLights));
       pbrPass->clearLightShadows();
       pbrPass->setEnvironmentControls(
           debugUiSettings.environmentRotationRadians,
@@ -728,11 +729,12 @@ private:
     if (debugOverlayPass != nullptr) {
       debugOverlayPass->setCamera(geometryUniformData.view,
                                   geometryUniformData.proj);
-      debugOverlayPass->setSceneLights(debugUiSettings.sceneLights);
       debugOverlayPass->setMarkersVisible(debugUiSettings.lightMarkersVisible);
       debugOverlayPass->setMarkerScale(debugUiSettings.lightMarkerScale);
-      debugOverlayPass->setDirectionalAnchor(
-          AppSceneController::sceneObjectsAnchor(debugUiSettings));
+      debugOverlayPass->setLightMarkers(RendererSceneAdapters::buildDebugLightMarkers(
+          debugUiSettings.sceneLights,
+          AppSceneController::sceneObjectsAnchor(debugUiSettings),
+          debugUiSettings.lightMarkerScale));
     }
     updateBoneOverlay();
     if (tonemapPass != nullptr) {

@@ -1,7 +1,6 @@
 #pragma once
 
-#include "engine/animation/AnimationPlayback.h"
-#include "engine/animation/SkeletonPose.h"
+#include "engine/animation/ModelAnimationState.h"
 #include "renderer/core/RenderPass.h"
 #include "renderer/resources/FrameGeometryUniforms.h"
 #include "renderer/resources/SkinPaletteBindings.h"
@@ -186,144 +185,62 @@ public:
   const ModelAsset *modelAsset() const { return asset.get(); }
 
   AnimationPlaybackState *mutableAnimationPlayback() {
-    return asset != nullptr && asset->skeletonAsset() != nullptr &&
-                   !asset->skeletonAsset()->animations.empty()
-               ? &animationPlayback
-               : nullptr;
+    return animationState.mutablePlayback(skeletonAsset());
   }
 
   const AnimationPlaybackState *currentAnimationPlayback() const {
-    return asset != nullptr && asset->skeletonAsset() != nullptr &&
-                   !asset->skeletonAsset()->animations.empty()
-               ? &animationPlayback
-               : nullptr;
+    return animationState.currentPlayback(skeletonAsset());
   }
 
   SkeletonPose *mutableSkeletonPose() {
-    return skeletonPose && asset != nullptr && asset->skeletonAsset() != nullptr
-               ? &*skeletonPose
-               : nullptr;
+    return animationState.mutablePose(skeletonAsset());
   }
 
   const SkeletonPose *currentSkeletonPose() const {
-    return skeletonPose && asset != nullptr && asset->skeletonAsset() != nullptr
-               ? &*skeletonPose
-               : nullptr;
+    return animationState.currentPose(skeletonAsset());
   }
 
   void resetSkeletonPose() {
-    if (asset == nullptr || asset->skeletonAsset() == nullptr) {
-      skeletonPose.reset();
-      return;
-    }
-
-    if (!skeletonPose.has_value()) {
-      skeletonPose.emplace();
-    }
-    skeletonPose->resetToBindPose(*asset->skeletonAsset());
+    animationState.resetPose(skeletonAsset());
   }
 
   bool hasSelectedAnimation() const {
-    return asset != nullptr && asset->skeletonAsset() != nullptr &&
-           animationPlayback.selectedSourceAnimationIndex >= 0 &&
-           static_cast<size_t>(animationPlayback.selectedSourceAnimationIndex) <
-               asset->skeletonAsset()->animations.size();
+    return animationState.hasSelectedAnimation(skeletonAsset());
   }
 
   const AnimationClipData *selectedAnimationClip() const {
-    return hasSelectedAnimation()
-               ? &asset->skeletonAsset()->animations[static_cast<size_t>(
-                     animationPlayback.selectedSourceAnimationIndex)]
-               : nullptr;
+    return animationState.selectedClip(skeletonAsset());
   }
 
   void selectSourceAnimation(int animationIndex) {
-    animationPlayback.selectedSourceAnimationIndex = animationIndex;
-    animationPlayback.currentTimeSeconds = 0.0f;
-    animationPlayback.playing = false;
-    sampleSelectedAnimation();
+    animationState.selectSourceAnimation(skeletonAsset(), animationIndex);
   }
 
   void playSelectedAnimation() {
-    if (selectedAnimationClip() != nullptr) {
-      animationPlayback.playing = true;
-    }
+    animationState.playSelectedAnimation(skeletonAsset());
   }
 
-  void pauseAnimationPlayback() { animationPlayback.playing = false; }
+  void pauseAnimationPlayback() { animationState.pauseAnimationPlayback(); }
 
   void resetSelectedAnimation() {
-    animationPlayback.currentTimeSeconds = 0.0f;
-    animationPlayback.playing = false;
-    sampleSelectedAnimation();
+    animationState.resetSelectedAnimation(skeletonAsset());
   }
 
   void sampleSelectedAnimation() {
-    if (asset == nullptr || asset->skeletonAsset() == nullptr ||
-        !skeletonPose.has_value()) {
-      return;
-    }
-
-    const SkeletonAssetData &skeleton = *asset->skeletonAsset();
-    const AnimationClipData *clip = selectedAnimationClip();
-    if (clip == nullptr) {
-      skeletonPose->resetToBindPose(skeleton);
-      return;
-    }
-
-    sampleAnimationClipIntoPose(skeleton, *clip,
-                                animationPlayback.currentTimeSeconds,
-                                *skeletonPose);
+    animationState.sampleSelectedAnimation(skeletonAsset());
   }
 
   void updateAnimationPlayback(float deltaSeconds) {
-    if (!animationPlayback.playing || asset == nullptr ||
-        asset->skeletonAsset() == nullptr || !skeletonPose.has_value()) {
-      return;
-    }
-
-    const AnimationClipData *clip = selectedAnimationClip();
-    if (clip == nullptr) {
-      animationPlayback.playing = false;
-      return;
-    }
-
-    const float duration = std::max(clip->durationSeconds, 0.0f);
-    if (duration <= 0.0f) {
-      animationPlayback.currentTimeSeconds = 0.0f;
-      sampleSelectedAnimation();
-      animationPlayback.playing = false;
-      return;
-    }
-
-    animationPlayback.currentTimeSeconds +=
-        deltaSeconds * animationPlayback.speed;
-
-    if (animationPlayback.loop) {
-      while (animationPlayback.currentTimeSeconds > duration) {
-        animationPlayback.currentTimeSeconds -= duration;
-      }
-      while (animationPlayback.currentTimeSeconds < 0.0f) {
-        animationPlayback.currentTimeSeconds += duration;
-      }
-    } else {
-      animationPlayback.currentTimeSeconds = glm::clamp(
-          animationPlayback.currentTimeSeconds, 0.0f, duration);
-      if (animationPlayback.currentTimeSeconds >= duration) {
-        animationPlayback.playing = false;
-      }
-    }
-
-    sampleSelectedAnimation();
+    animationState.updatePlayback(skeletonAsset(), deltaSeconds);
   }
 
   void updateSkinPalettes(uint32_t frameIndex) {
-    if (asset == nullptr || asset->skeletonAsset() == nullptr ||
-        !skeletonPose.has_value()) {
+    const SkeletonAssetData *skeleton = skeletonAsset();
+    const SkeletonPose *pose = animationState.currentPose(skeleton);
+    if (asset == nullptr || skeleton == nullptr || pose == nullptr) {
       return;
     }
 
-    const SkeletonAssetData &skeleton = *asset->skeletonAsset();
     const auto &submeshes = asset->submeshes();
     for (size_t submeshIndex = 0; submeshIndex < submeshes.size();
          ++submeshIndex) {
@@ -334,12 +251,12 @@ public:
 
       const auto &submesh = submeshes[submeshIndex];
       if (submesh.skinIndex < 0 ||
-          static_cast<size_t>(submesh.skinIndex) >= skeleton.skins.size()) {
+          static_cast<size_t>(submesh.skinIndex) >= skeleton->skins.size()) {
         continue;
       }
 
       const SkinData &skin =
-          skeleton.skins[static_cast<size_t>(submesh.skinIndex)];
+          skeleton->skins[static_cast<size_t>(submesh.skinIndex)];
       if (skin.jointNodeIndices.size() > MAX_SKIN_JOINTS) {
         throw std::runtime_error("skin joint count exceeds MAX_SKIN_JOINTS");
       }
@@ -351,9 +268,9 @@ public:
 
       glm::mat4 meshNodeWorld = submesh.transform;
       if (submesh.nodeIndex >= 0 &&
-          static_cast<size_t>(submesh.nodeIndex) < skeleton.nodes.size()) {
+          static_cast<size_t>(submesh.nodeIndex) < skeleton->nodes.size()) {
         meshNodeWorld =
-            skeletonPose->worldTransform(static_cast<size_t>(submesh.nodeIndex));
+            pose->worldTransform(static_cast<size_t>(submesh.nodeIndex));
       }
       const glm::mat4 inverseMeshNodeWorld = glm::inverse(meshNodeWorld);
 
@@ -361,12 +278,12 @@ public:
            ++jointIndex) {
         const int jointNodeIndex = skin.jointNodeIndices[jointIndex];
         if (jointNodeIndex < 0 ||
-            static_cast<size_t>(jointNodeIndex) >= skeleton.nodes.size()) {
+            static_cast<size_t>(jointNodeIndex) >= skeleton->nodes.size()) {
           continue;
         }
 
         const glm::mat4 jointWorld =
-            skeletonPose->worldTransform(static_cast<size_t>(jointNodeIndex));
+            pose->worldTransform(static_cast<size_t>(jointNodeIndex));
         palette.joints[jointIndex] =
             inverseMeshNodeWorld * jointWorld *
             skin.inverseBindMatrices[jointIndex];
@@ -381,6 +298,10 @@ private:
     SkinPaletteBindings bindings;
     bool valid = false;
   };
+
+  const SkeletonAssetData *skeletonAsset() const {
+    return asset == nullptr ? nullptr : asset->skeletonAsset();
+  }
 
   template <typename TAsset>
   void loadAsset(const std::string &path, CommandContext &commandContext,
@@ -401,9 +322,7 @@ private:
                        framesInFlight);
     if (const SkeletonAssetData *loadedSkeleton = loadedAsset->skeletonAsset();
         loadedSkeleton != nullptr && !loadedSkeleton->nodes.empty()) {
-      skeletonPose.emplace();
-      skeletonPose->initialize(*loadedSkeleton);
-      animationPlayback = AnimationPlaybackState{};
+      animationState.reset(loadedSkeleton);
       skinPaletteBindings.clear();
       skinPaletteBindings.resize(loadedAsset->submeshes().size());
       if (secondaryDescriptorSetLayout != nullptr) {
@@ -418,8 +337,7 @@ private:
         }
       }
     } else {
-      skeletonPose.reset();
-      animationPlayback = AnimationPlaybackState{};
+      animationState.clear();
       skinPaletteBindings.clear();
     }
     asset = std::move(loadedAsset);
@@ -427,7 +345,6 @@ private:
 
   std::unique_ptr<ModelAsset> asset;
   ModelMaterialSet materialSet;
-  std::optional<SkeletonPose> skeletonPose;
-  AnimationPlaybackState animationPlayback;
+  ModelAnimationState animationState;
   std::vector<SubmeshSkinPaletteResource> skinPaletteBindings;
 };

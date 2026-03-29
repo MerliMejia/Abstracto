@@ -1,8 +1,6 @@
 #pragma once
 
 #include "renderer/lighting/ImageBasedLighting.h"
-#include "engine/scene/LightTypes.h"
-#include "engine/scene/SceneLightSet.h"
 #include "renderer/core/FullscreenRenderPass.h"
 #include "renderer/core/PassUniformSet.h"
 #include "GeometryPass.h"
@@ -30,9 +28,29 @@ constexpr uint32_t MAX_PBR_LIGHTS = 8;
 constexpr uint32_t MAX_PBR_SHADOW_MAPS = 4;
 constexpr uint32_t INVALID_PBR_SHADOW_MAP = ~0u;
 
+enum class PbrLightType : uint32_t {
+  Directional = 0,
+  Point = 1,
+  Spot = 2,
+};
+
+struct PbrLightInput {
+  uint32_t sourceIndex = 0;
+  PbrLightType type = PbrLightType::Directional;
+  bool enabled = true;
+  glm::vec3 position{0.0f, 0.0f, 0.0f};
+  float range = 8.0f;
+  glm::vec3 direction{0.0f, -1.0f, 0.0f};
+  float radiance = 1.0f;
+  glm::vec3 color{1.0f, 1.0f, 1.0f};
+  float radius = 0.25f;
+  float innerConeAngleRadians = glm::radians(18.0f);
+  float outerConeAngleRadians = glm::radians(28.0f);
+};
+
 struct PbrLightUniformData {
   glm::vec4 positionAndType{0.0f, 0.0f, 0.0f,
-                            static_cast<float>(SceneLightType::Directional)};
+                            static_cast<float>(PbrLightType::Directional)};
   glm::vec4 directionAndRange{0.0f, -1.0f, 0.0f, 1.0f};
   glm::vec4 colorAndRadiance{1.0f, 1.0f, 1.0f, 1.0f};
   glm::vec4 spotAngles{1.0f, 0.0f, 0.0f, 0.0f};
@@ -105,17 +123,20 @@ public:
                   uniformData.viewForwardAndUnused.w);
   }
 
-  void setSceneLights(const SceneLightSet &sceneLights) {
+  void setLights(const std::vector<PbrLightInput> &lights) {
     uint32_t lightCount = 0;
-    sceneLightToUniformIndex.assign(sceneLights.size(), -1);
+    uint32_t maxSourceIndex = 0;
+    for (const auto &light : lights) {
+      maxSourceIndex = std::max(maxSourceIndex, light.sourceIndex);
+    }
+    sourceLightToUniformIndex.assign(
+        lights.empty() ? 0 : static_cast<size_t>(maxSourceIndex) + 1, -1);
 
     for (auto &lightUniform : uniformData.lights) {
       lightUniform = PbrLightUniformData{};
     }
 
-    for (size_t sceneIndex = 0; sceneIndex < sceneLights.lights().size();
-         ++sceneIndex) {
-      const auto &light = sceneLights.lights()[sceneIndex];
+    for (const auto &light : lights) {
       if (!light.enabled || lightCount >= MAX_PBR_LIGHTS) {
         continue;
       }
@@ -124,13 +145,14 @@ public:
       lightUniform.directionAndRange = glm::vec4(
           glm::normalize(light.direction), std::max(light.range, 0.01f));
       lightUniform.colorAndRadiance =
-          glm::vec4(light.color, light.radianceScale());
+          glm::vec4(light.color, std::max(light.radiance, 0.0f));
       lightUniform.positionAndType =
           glm::vec4(light.position, static_cast<float>(light.type));
       lightUniform.spotAngles = glm::vec4(std::cos(light.innerConeAngleRadians),
                                           std::cos(light.outerConeAngleRadians),
                                           std::max(light.radius, 0.0f), 0.0f);
-      sceneLightToUniformIndex[sceneIndex] = static_cast<int32_t>(lightCount);
+      sourceLightToUniformIndex[light.sourceIndex] =
+          static_cast<int32_t>(lightCount);
       ++lightCount;
     }
 
@@ -138,12 +160,12 @@ public:
   }
 
   std::optional<uint32_t>
-  uniformLightIndexForSceneLight(size_t sceneLightIndex) const {
-    if (sceneLightIndex >= sceneLightToUniformIndex.size()) {
+  uniformLightIndexForSource(size_t sourceIndex) const {
+    if (sourceIndex >= sourceLightToUniformIndex.size()) {
       return std::nullopt;
     }
 
-    const int32_t packedIndex = sceneLightToUniformIndex[sceneLightIndex];
+    const int32_t packedIndex = sourceLightToUniformIndex[sourceIndex];
     if (packedIndex < 0) {
       return std::nullopt;
     }
@@ -272,7 +294,7 @@ private:
       nullptr, nullptr, nullptr, nullptr};
   PbrPassUniformData uniformData{};
   PassUniformSet<PbrPassUniformData> lightUniformSet;
-  std::vector<int32_t> sceneLightToUniformIndex;
+  std::vector<int32_t> sourceLightToUniformIndex;
 
   void validateResources() const {
     if (sourcePassRef == nullptr) {
