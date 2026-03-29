@@ -111,20 +111,6 @@ else()
     message(FATAL_ERROR "ImGui source not found. Install it or set ABSTRACTO_FETCH_DEPS=ON.")
 endif()
 
-add_executable(
-  Abstracto
-  apps/tree_scene/main.cpp
-  src/engine/assets/GltfModelAsset.cpp
-  src/engine/assets/StbImageImplementation.cpp
-  src/engine/assets/TinyObjLoaderImplementation.cpp
-)
-
-target_compile_definitions(
-  Abstracto
-  PRIVATE
-    VULKAN_HPP_NO_CONSTRUCTORS
-)
-
 set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/resources/shaders)
 file(GLOB ABSTRACTO_SLANG_SOURCES CONFIGURE_DEPENDS
   "${ABSTRACTO_SHADER_DIR}/*.slang"
@@ -157,53 +143,188 @@ endforeach()
 
 if(ABSTRACTO_SLANGC_EXECUTABLE AND ABSTRACTO_SLANG_OUTPUTS)
     add_custom_target(abstracto_shaders DEPENDS ${ABSTRACTO_SLANG_OUTPUTS})
-    add_dependencies(Abstracto abstracto_shaders)
 else()
     message(WARNING "slangc not found (or no Slang sources were found). Install slangc to auto-generate resources/shaders/*.spv.")
 endif()
 
+if(DEFINED stb_SOURCE_DIR)
+    set(ABSTRACTO_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
+else()
+    find_path(STB_INCLUDE_DIR stb_image.h)
+    if(NOT STB_INCLUDE_DIR)
+        message(FATAL_ERROR "stb_image.h not found. Install stb or set ABSTRACTO_FETCH_DEPS=ON.")
+    endif()
+    set(ABSTRACTO_STB_INCLUDE_DIR ${STB_INCLUDE_DIR})
+endif()
+
+if(DEFINED tinyobjloader_SOURCE_DIR)
+    set(ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR ${tinyobjloader_SOURCE_DIR})
+else()
+    find_path(TINYOBJLOADER_INCLUDE_DIR tiny_obj_loader.h)
+    if(NOT TINYOBJLOADER_INCLUDE_DIR)
+        message(FATAL_ERROR "tiny_obj_loader.h not found. Install tinyobjloader or set ABSTRACTO_FETCH_DEPS=ON.")
+    endif()
+    set(ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR ${TINYOBJLOADER_INCLUDE_DIR})
+endif()
+
+if(DEFINED tinygltf_SOURCE_DIR)
+    set(ABSTRACTO_TINYGLTF_INCLUDE_DIR ${tinygltf_SOURCE_DIR})
+else()
+    find_path(TINYGLTF_INCLUDE_DIR tiny_gltf.h)
+    if(NOT TINYGLTF_INCLUDE_DIR)
+        message(FATAL_ERROR "tiny_gltf.h not found. Install tinygltf or set ABSTRACTO_FETCH_DEPS=ON.")
+    endif()
+    set(ABSTRACTO_TINYGLTF_INCLUDE_DIR ${TINYGLTF_INCLUDE_DIR})
+endif()
+
+add_library(abstracto_renderer INTERFACE)
+target_compile_definitions(
+  abstracto_renderer
+  INTERFACE
+    VULKAN_HPP_NO_CONSTRUCTORS
+)
+target_include_directories(
+  abstracto_renderer
+  INTERFACE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+    ${ABSTRACTO_STB_INCLUDE_DIR}
+    ${ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR}
+    ${ABSTRACTO_TINYGLTF_INCLUDE_DIR}
+)
 target_link_libraries(
-  Abstracto
-  PRIVATE
+  abstracto_renderer
+  INTERFACE
     Vulkan::Vulkan
     ${ABSTRACTO_GLFW_TARGET}
     ${ABSTRACTO_GLM_TARGET}
     imgui
 )
 
+add_library(abstracto_scene INTERFACE)
 target_include_directories(
-  Abstracto
-  PRIVATE
+  abstracto_scene
+  INTERFACE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/include
 )
+target_link_libraries(
+  abstracto_scene
+  INTERFACE
+    ${ABSTRACTO_GLM_TARGET}
+)
 
-if(DEFINED stb_SOURCE_DIR)
-    target_include_directories(Abstracto PRIVATE ${stb_SOURCE_DIR})
-else()
-    find_path(STB_INCLUDE_DIR stb_image.h)
-    if(NOT STB_INCLUDE_DIR)
-        message(FATAL_ERROR "stb_image.h not found. Install stb or set ABSTRACTO_FETCH_DEPS=ON.")
-    endif()
-    target_include_directories(Abstracto PRIVATE ${STB_INCLUDE_DIR})
+add_library(abstracto_animation INTERFACE)
+target_include_directories(
+  abstracto_animation
+  INTERFACE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(
+  abstracto_animation
+  INTERFACE
+    ${ABSTRACTO_GLM_TARGET}
+)
+
+add_library(
+  abstracto_assets
+  STATIC
+    src/engine/assets/GltfModelAsset.cpp
+    src/engine/assets/StbImageImplementation.cpp
+    src/engine/assets/TinyObjLoaderImplementation.cpp
+)
+target_include_directories(
+  abstracto_assets
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+    ${ABSTRACTO_STB_INCLUDE_DIR}
+    ${ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR}
+    ${ABSTRACTO_TINYGLTF_INCLUDE_DIR}
+)
+target_link_libraries(
+  abstracto_assets
+  PUBLIC
+    abstracto_renderer
+    abstracto_animation
+)
+
+add_library(abstracto_engine INTERFACE)
+target_include_directories(
+  abstracto_engine
+  INTERFACE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+)
+target_link_libraries(
+  abstracto_engine
+  INTERFACE
+    abstracto_renderer
+    abstracto_scene
+    abstracto_animation
+    abstracto_assets
+)
+
+add_executable(
+  Abstracto
+  apps/tree_scene/main.cpp
+)
+target_link_libraries(
+  Abstracto
+  PRIVATE
+    abstracto_engine
+)
+if(TARGET abstracto_shaders)
+  add_dependencies(Abstracto abstracto_shaders)
 endif()
 
-if(DEFINED tinyobjloader_SOURCE_DIR)
-    target_include_directories(Abstracto PRIVATE ${tinyobjloader_SOURCE_DIR})
-else()
-    find_path(TINYOBJLOADER_INCLUDE_DIR tiny_obj_loader.h)
-    if(NOT TINYOBJLOADER_INCLUDE_DIR)
-        message(FATAL_ERROR "tiny_obj_loader.h not found. Install tinyobjloader or set ABSTRACTO_FETCH_DEPS=ON.")
-    endif()
-    target_include_directories(Abstracto PRIVATE ${TINYOBJLOADER_INCLUDE_DIR})
-endif()
+add_executable(
+  AbstractoRendererExample
+  apps/module_examples/renderer/main.cpp
+)
+target_link_libraries(
+  AbstractoRendererExample
+  PRIVATE
+    abstracto_renderer
+)
 
-if(DEFINED tinygltf_SOURCE_DIR)
-    target_include_directories(Abstracto PRIVATE ${tinygltf_SOURCE_DIR})
-else()
-    find_path(TINYGLTF_INCLUDE_DIR tiny_gltf.h)
-    if(NOT TINYGLTF_INCLUDE_DIR)
-        message(FATAL_ERROR "tiny_gltf.h not found. Install tinygltf or set ABSTRACTO_FETCH_DEPS=ON.")
-    endif()
-    target_include_directories(Abstracto PRIVATE ${TINYGLTF_INCLUDE_DIR})
-endif()
+add_executable(
+  AbstractoSceneExample
+  apps/module_examples/scene/main.cpp
+)
+target_link_libraries(
+  AbstractoSceneExample
+  PRIVATE
+    abstracto_scene
+)
+
+add_executable(
+  AbstractoAnimationExample
+  apps/module_examples/animation/main.cpp
+)
+target_link_libraries(
+  AbstractoAnimationExample
+  PRIVATE
+    abstracto_animation
+)
+
+add_executable(
+  AbstractoAssetsExample
+  apps/module_examples/assets/main.cpp
+)
+target_link_libraries(
+  AbstractoAssetsExample
+  PRIVATE
+    abstracto_assets
+)
+
+add_executable(
+  AbstractoEngineExample
+  apps/module_examples/engine/main.cpp
+)
+target_link_libraries(
+  AbstractoEngineExample
+  PRIVATE
+    abstracto_engine
+)

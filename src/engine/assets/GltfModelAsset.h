@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ModelAsset.h"
-#include "engine/assets/SkeletonTypes.h"
+#include "engine/animation/SkeletonTypes.h"
 
 class GltfModelAsset : public ModelAsset {
 public:

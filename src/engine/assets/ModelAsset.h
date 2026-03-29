@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/assets/SkeletonTypes.h"
+#include "engine/animation/SkeletonTypes.h"
 #include "renderer/resources/Mesh.h"
 
 class ModelAsset {

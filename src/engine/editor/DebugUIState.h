@@ -5,6 +5,7 @@
 #include "renderer/lighting/ImageBasedLightingTypes.h"
 #include "engine/assets/RenderableModel.h"
 #include "engine/scene/SceneLightSet.h"
+#include "engine/scene/SceneTypes.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -29,18 +30,6 @@ enum class PresentedOutput : uint32_t {
   SpotShadow0 = 9,
   SpotShadow1 = 10,
   SpotShadow2 = 11,
-};
-
-struct SceneTransform {
-  glm::vec3 position = {0.0f, 0.0f, 0.0f};
-  glm::vec3 rotationDegrees = {0.0f, 0.0f, 0.0f};
-  glm::vec3 scale = {1.0f, 1.0f, 1.0f};
-};
-
-struct SceneObject {
-  std::string name = "Scene Model";
-  SceneTransform transform{};
-  bool visible = true;
 };
 
 struct DefaultDebugUISettings {

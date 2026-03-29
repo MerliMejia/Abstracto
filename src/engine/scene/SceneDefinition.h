@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/scene/SceneLightSet.h"
+#include "engine/scene/SceneTypes.h"
 #include "engine/editor/DebugUIState.h"
 #include <functional>
 #include <string>
