@@ -111,7 +111,7 @@ else()
     message(FATAL_ERROR "ImGui source not found. Install it or set ABSTRACTO_FETCH_DEPS=ON.")
 endif()
 
-set(ABSTRACTO_SHADER_DIR ${CMAKE_SOURCE_DIR}/resources/shaders)
+set(ABSTRACTO_SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders)
 file(GLOB ABSTRACTO_SLANG_SOURCES CONFIGURE_DEPENDS
   "${ABSTRACTO_SHADER_DIR}/*.slang"
 )
@@ -186,8 +186,8 @@ target_compile_definitions(
 target_include_directories(
   abstracto_renderer
   INTERFACE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${ABSTRACTO_STB_INCLUDE_DIR}
     ${ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR}
     ${ABSTRACTO_TINYGLTF_INCLUDE_DIR}
@@ -201,80 +201,11 @@ target_link_libraries(
     imgui
 )
 
-add_library(abstracto_scene INTERFACE)
-target_include_directories(
-  abstracto_scene
-  INTERFACE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(
-  abstracto_scene
-  INTERFACE
-    ${ABSTRACTO_GLM_TARGET}
-)
-
-add_library(abstracto_animation INTERFACE)
-target_include_directories(
-  abstracto_animation
-  INTERFACE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(
-  abstracto_animation
-  INTERFACE
-    ${ABSTRACTO_GLM_TARGET}
-)
-
-add_library(
-  abstracto_assets
-  STATIC
-    src/engine/assets/GltfModelAsset.cpp
-    src/engine/assets/StbImageImplementation.cpp
-    src/engine/assets/TinyObjLoaderImplementation.cpp
-)
-target_include_directories(
-  abstracto_assets
-  PUBLIC
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/include
-    ${ABSTRACTO_STB_INCLUDE_DIR}
-    ${ABSTRACTO_TINYOBJLOADER_INCLUDE_DIR}
-    ${ABSTRACTO_TINYGLTF_INCLUDE_DIR}
-)
-target_link_libraries(
-  abstracto_assets
-  PUBLIC
-    abstracto_renderer
-    abstracto_animation
-)
-
-add_library(abstracto_engine INTERFACE)
-target_include_directories(
-  abstracto_engine
-  INTERFACE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/include
-)
-target_link_libraries(
-  abstracto_engine
-  INTERFACE
-    abstracto_renderer
-    abstracto_scene
-    abstracto_animation
-    abstracto_assets
-)
-
 add_executable(
   Abstracto
-  apps/tree_scene/main.cpp
+  apps/module_examples/renderer/main.cpp
 )
-target_link_libraries(
-  Abstracto
-  PRIVATE
-    abstracto_engine
-)
+target_link_libraries(Abstracto PRIVATE abstracto_renderer)
 if(TARGET abstracto_shaders)
   add_dependencies(Abstracto abstracto_shaders)
 endif()
@@ -287,44 +218,4 @@ target_link_libraries(
   AbstractoRendererExample
   PRIVATE
     abstracto_renderer
-)
-
-add_executable(
-  AbstractoSceneExample
-  apps/module_examples/scene/main.cpp
-)
-target_link_libraries(
-  AbstractoSceneExample
-  PRIVATE
-    abstracto_scene
-)
-
-add_executable(
-  AbstractoAnimationExample
-  apps/module_examples/animation/main.cpp
-)
-target_link_libraries(
-  AbstractoAnimationExample
-  PRIVATE
-    abstracto_animation
-)
-
-add_executable(
-  AbstractoAssetsExample
-  apps/module_examples/assets/main.cpp
-)
-target_link_libraries(
-  AbstractoAssetsExample
-  PRIVATE
-    abstracto_assets
-)
-
-add_executable(
-  AbstractoEngineExample
-  apps/module_examples/engine/main.cpp
-)
-target_link_libraries(
-  AbstractoEngineExample
-  PRIVATE
-    abstracto_engine
 )
