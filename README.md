@@ -16,71 +16,98 @@
   <img src="https://img.shields.io/github/last-commit/MerliMejia/Abstracto?style=flat-square&logo=github" alt="Last commit" />
 </p>
 
-Abstracto is a Vulkan renderer that turns the API's moving parts into named, reusable layers. It is built as a collection of abstractions, not a rigid framework: you can stay close to the metal with the backend contexts, or move upward into a pass-oriented renderer with scene passes, pass-owned uniforms, fullscreen post-process passes, model loading, scene lighting, shadow mapping, PBR, tonemapping, debug presentation, overlay tools, and an ImGui control layer.
+Abstracto is a Vulkan renderer that turns the API's moving parts into named, reusable layers. It is built as a collection of abstractions, not a rigid framework. The point of the project is to keep Vulkan explicit while organizing the renderer into named abstraction layers that can be studied one by one.
 
-The name comes from the Spanish word for "abstract." That is the point of the project: learn Vulkan by breaking it into smaller systems that are easier to understand, reuse, and compose.
+## What this repo is for
 
-![Current Abstracto render](assets/gallery/tree_render.jpg)
-![Night Abstracto render](assets/gallery/night_render.jpg)
-![First Abstracto render](assets/gallery/current_render.jpg)
+- learning Vulkan through explicit layers instead of one large engine
+- studying a pass-based renderer architecture
+- building renderer features on top of reusable pass abstractions
+- using small examples and tutorials to climb from simple rendering to multi-pass post-process workflows
 
-## Why Abstracto?
+## Implemented so far
 
-- Thin bootstrap path: get a window, Vulkan device, swapchain, command buffers, and frame sync without committing to a full engine.
-- Layered renderer API: move from `VulkanBackend` into `RenderPass`, `PassRenderer`, `SceneRenderPass`, `UniformSceneRenderPass`, and `FullscreenRenderPass`.
-- Real sample app in `apps/tree_scene/main.cpp`: the current demo loads a night scene, renders one directional shadow map plus three spot shadow maps, then runs `GeometryPass -> PbrPass -> TonemapPass -> DebugPresentPass -> DebugOverlayPass -> ImGuiPass`.
-- Asset pipeline included: OBJ and glTF loading, textures, samplers, material bindings, HDR environment maps, procedural-sky IBL baking, and debug-session persistence.
-- Built to be studied: the wiki walks from a triangle on the swapchain to pass-owned uniforms and fullscreen source-pass sampling.
+- Vulkan window, device, swapchain, command-buffer, and frame-sync bootstrap
+- Separated backend contexts for instance, surface, device, swapchain, commands, and synchronization
+- Pass-based renderer architecture
+- Reusable render-pass abstractions
+- `RenderPass`
+- `RasterRenderPass`
+- `SceneRenderPass`
+- `UniformSceneRenderPass`
+- `FullscreenRenderPass`
+- Pass chaining with `PassRenderer`
+- Offscreen render targets that can be sampled by later passes
+- Pass-owned uniform buffers
+- Pass-owned sampled image bindings
+- Optional push constants in passes
+- Mesh GPU upload and draw submission through `RenderItem`
+- Fullscreen quad mesh helper
+- Texture loading and sampler abstractions
+- Material descriptor bindings
+- Image-based lighting resources and baking support
+- Geometry pass
+- Shadow pass
+- Fullscreen lighting pass
+- PBR pass
+- Tonemap pass
+- Debug present pass
+- Debug overlay pass
+- ImGui pass
+- Renderer-side debug visualization for light markers
+- Renderer-side skin palette bindings and skinning-related draw data
+- Slang shader pipeline with checked-in SPIR-V outputs
 
-### Abstraction ladder
+## Current abstraction ladder
 
-| Layer                   | What it gives you                                                                                           |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Bootstrap               | `AppWindow`, `BackendConfig`, `VulkanBackend`, `FrameState`                                                 |
-| Backend contexts        | `InstanceContext`, `SurfaceContext`, `DeviceContext`, `SwapchainContext`, `CommandContext`, `FrameSync`     |
-| Geometry and assets     | `Mesh`, `FullscreenMesh`, `RenderableModel`, `ObjModelAsset`, `GltfModelAsset`                              |
-| Materials and resources | `Texture`, `Sampler`, `DescriptorBindings`, `FrameGeometryUniforms`, `ImageBasedLighting`, `SceneLightSet`  |
-| Rendering core          | `RenderPass`, `RenderItem`, `PassRenderer`, `PipelineSpec`, `ShaderProgram`                                 |
-| High-level pass types   | `SceneRenderPass`, `UniformSceneRenderPass`, `FullscreenRenderPass`                                         |
-| Concrete features       | `GeometryPass`, `ShadowPass`, `PbrPass`, `TonemapPass`, `DebugPresentPass`, `DebugOverlayPass`, `ImGuiPass` |
+| Layer | Main types |
+| --- | --- |
+| Bootstrap | `AppWindow`, `BackendConfig`, `VulkanBackend`, `FrameState` |
+| Backend contexts | `InstanceContext`, `SurfaceContext`, `DeviceContext`, `SwapchainContext`, `CommandContext`, `FrameSync` |
+| Geometry and resources | `Mesh`, `Texture`, `Sampler`, `DescriptorBindings`, `FrameGeometryUniforms`, `ModelMaterialSet` |
+| Lighting resources | `ImageBasedLighting`, `ImageBasedLightingBaker` |
+| Renderer core | `RenderPass`, `PassRenderer`, `PipelineSpec`, `ShaderProgram`, `PassUniformSet`, `PassImageSet` |
+| High-level pass types | `SceneRenderPass`, `UniformSceneRenderPass`, `FullscreenRenderPass`, `MeshRenderPass`, `UniformMeshRenderPass` |
+| Concrete passes | `GeometryPass`, `ShadowPass`, `LightPass`, `PbrPass`, `TonemapPass`, `DebugPresentPass`, `DebugOverlayPass`, `ImGuiPass` |
 
-For the full breakdown, see the wiki page: [Current abstractions in the project](https://github.com/MerliMejia/Abstracto/wiki/Current-abstractions-in-the-project).
+## Repo layout
 
-## What The Current Sample App Shows
+- `src/renderer/backend`
+  low-level Vulkan bootstrap and frame lifecycle
+- `src/renderer/core`
+  reusable renderer and pass abstractions
+- `src/renderer/resources`
+  meshes, textures, samplers, descriptor-backed resources
+- `src/renderer/lighting`
+  image-based lighting support and bake types
+- `src/renderer/debug`
+  renderer-side debug helper geometry
+- `src/renderer/passes`
+  concrete renderer features built on the core abstractions
+- `resources/shaders`
+  Slang shaders and checked-in SPIR-V outputs
+- `apps/module_examples/renderer/main.cpp`
+  current renderer example entry point
 
-- A Vulkan backend with swapchain lifecycle, command submission, and frame synchronization.
-- A night-scene demo that loads `assets/models/night.glb` and uses `assets/textures/dikhololo_night_4k.hdr` as the default environment.
-- A render setup that draws the scene into the G-buffer, computes fullscreen PBR lighting, tonemaps HDR output, presents selectable debug views, draws light markers, and overlays an ImGui UI.
-- Runtime scene lights with directional, point, and spot types, plus shadow casting for one directional light and up to three spot lights.
-- Material editing, camera movement, model transforms, tonemap controls, PBR debug views, output switching, performance stats, session save/reload, and IBL controls in the debug UI.
-- Slang shaders compiled to SPIR-V, with generated `.spv` files already checked into `resources/shaders`.
+## Study path
 
-## Current Render Graph
+- Start with the backend layer if you want the smallest Vulkan bootstrap.
+- Move to `RenderPass`, `RasterRenderPass`, and `PassRenderer` if you want to understand the renderer core.
+- Use `tutorial.md` for a step-by-step example of `UniformSceneRenderPass`, pass-owned uniforms, and optional push constants.
+- Use `turorial2.md` for a step-by-step example of `FullscreenRenderPass` and sampled pass-to-pass post-processing.
+- Use `ist.md` as a compact list of the renderer features implemented so far.
 
-The sample app does more than a straight linear pass chain. The scene model is rendered into the geometry pass and also into the enabled shadow passes:
-
-- `ShadowPass` for the primary directional light
-- `ShadowPass x3` for spot lights
-- `GeometryPass` for albedo, normals, material data, emissive, and depth
-- `PbrPass`, which samples the G-buffer, the IBL resources, and the four shadow maps
-- `TonemapPass` for HDR to display mapping
-- `DebugPresentPass`, which can present G-buffer outputs, lighting outputs, tonemapped output, or any of the shadow maps
-- `DebugOverlayPass`, which draws line-based light markers on top of the selected presentation
-- `ImGuiPass` for runtime controls
-
-Point-light shadows are not implemented yet, but point lights still contribute to the lighting pass.
-
-## Quick Start
+## Build
 
 ### Requirements
 
 - CMake 3.20+
-- A C++20 compiler
-- A Vulkan SDK or Vulkan loader/runtime available to CMake
-- `slangc` if you want CMake to regenerate SPIR-V from `.slang` files
-- Git if you want CMake to auto-fetch missing dependencies
+- a C++20 compiler
+- a Vulkan SDK or Vulkan loader/runtime available to CMake
+- `slangc` only if you want CMake to regenerate `.spv` files from `.slang`
+- Git only if you want CMake to auto-fetch missing dependencies
 
-### Build
+### Build commands
 
 ```bash
 cmake -S . -B build -DABSTRACTO_FETCH_DEPS=ON
@@ -97,46 +124,18 @@ cmake --build build -j4
 - tinygltf
 - Dear ImGui
 
-If `slangc` is not installed, the current checked-in `.spv` files still let the project build. You only need `slangc` when you add or modify Slang shaders and want CMake to regenerate them automatically.
+If `slangc` is not installed, the checked-in `.spv` files still allow the project to build. You only need `slangc` when you add or modify Slang shaders and want CMake to regenerate them automatically.
 
-## Runtime Notes
+## How to use the example target
 
-- Camera: move with `W`, `A`, `S`, `D`, `Q`, `E`; hold right mouse button and drag to look around.
-- Debug presentation: inspect G-buffer attachments, the lit PBR output, the tonemapped output, or the directional and spot shadow maps.
-- PBR debug modes: isolate final shading, direct lighting, diffuse IBL, specular IBL, ambient total, reflections, or background contribution.
-- Light editing: add/remove directional, point, and spot lights; tune color, power, exposure, direction, range, cone angles, marker visibility, and shadow bias settings.
-- Session persistence: the UI can save and reload the current debug session through `assets/debug/last_session.json`.
-- Environment workflow: the default session uses an HDRI. Procedural sky settings are still available for IBL baking when no HDR path is active.
+The `Abstracto` executable currently builds from `apps/module_examples/renderer/main.cpp`.
 
-## Pick Your Level
+That file is intentionally small and is meant to be replaced by following tutorials and experiments. The tutorials in this repo are written around that workflow: change the example entry point, build, run, study the next abstraction.
 
-- Want only a clean Vulkan bootstrap? Start with `AppWindow`, `BackendConfig`, and `VulkanBackend`.
-- Want direct control over the low-level setup? Work from the backend contexts in `src/renderer/backend`.
-- Want to route meshes through reusable render stages? Build on `RenderPass`, `RenderItem`, and `PassRenderer`.
-- Want pass-owned uniform buffers and optional push constants? Extend `UniformSceneRenderPass<TUniform, TPush>`.
-- Want a post-process that samples another pass? Extend `FullscreenRenderPass`.
-- Want the most complete reference in this repo? Read `apps/tree_scene/main.cpp` and follow the passes downward.
+## Scope note
 
-## Learning Path
+This repo is only the renderer.
 
-The wiki is one of the best parts of this repo. It does not just explain what classes exist; it shows how the abstractions are meant to be used.
+Higher-level systems such as scene management, animation, editor tooling, and runtime composition are intended to live outside this repo and be integrated elsewhere.
 
-| Step | Focus                                             | Wiki                                                                                                                                                                              | Branch                                    |
-| ---- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| 0    | Bootstrap the smallest window + backend setup     | [How To](<https://github.com/MerliMejia/Abstracto/wiki/How-To-(Work-In-Progress)>)                                                                                                | `example-minimal-code`                    |
-| 1    | Learn the abstraction map                         | [Current abstractions in the project](https://github.com/MerliMejia/Abstracto/wiki/Current-abstractions-in-the-project)                                                           | `main`                                    |
-| 2    | Render a triangle straight to the swapchain       | [Triangle to the Swapchain Tutorial](https://github.com/MerliMejia/Abstracto/wiki/Triangle-to-the-Swapchain-Tutorial)                                                             | `tutorial-triangle-to-swapchain`          |
-| 3    | Add a pass-owned uniform buffer and push constant | [Animated Triangle with a Pass-Owned Uniform or Push Constant](https://github.com/MerliMejia/Abstracto/wiki/Animated-Triangle-with-a-Pass%E2%80%90Owned-Uniform-or-Push-Constant) | `tutorial-animated-triangle-to-swapchain` |
-| 4    | Feed one pass into a fullscreen post-process      | [Fullscreen Post-Process over a Source Pass](https://github.com/MerliMejia/Abstracto/wiki/Fullscreen-Post%E2%80%90Process-over-a-Source-Pass)                                     | `tutorial-fullscreen-post-process`        |
-
-Wiki home: [Abstracto Wiki](https://github.com/MerliMejia/Abstracto/wiki)
-
-From there, the current sample app extends the same abstractions into scene-light management, shadow mapping, debug presentation, and runtime tooling.
-
-## Cool things about this project
-
-- It treats "abstraction" as something you can inspect instead of something hidden behind a giant engine wall.
-- It keeps the low-level Vulkan pieces visible enough to learn from, while still giving you higher-level rendering building blocks.
-- It uses the same pass model for simple tutorial triangles and for the more complete night-scene, shadow-mapped PBR pipeline in the current sample app.
-
-If you want a renderer that is small enough to read, but structured enough to grow, this is a repo to study.
+If you want a renderer that stays close enough to Vulkan to study, but still gives you reusable pass-oriented building blocks, that is what `Abstracto` is for.
