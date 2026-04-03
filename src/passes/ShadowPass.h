@@ -6,8 +6,7 @@
 
 struct ShadowPassPushConstant {
   glm::mat4 model{1.0f};
-  int skinningEnabled = 0;
-  glm::vec4 padding{0.0f};
+  glm::ivec4 skinningData{0, 0, 0, 0};
 };
 
 struct ShadowPassUniformData {
@@ -81,10 +80,10 @@ protected:
                 0, 0, vk::Format::eR32G32B32Sfloat,
                 offsetof(GeometryVertex, pos)),
             vk::VertexInputAttributeDescription(
-                4, 0, vk::Format::eR32G32B32A32Uint,
+                5, 0, vk::Format::eR32G32B32A32Uint,
                 offsetof(GeometryVertex, jointIndices)),
             vk::VertexInputAttributeDescription(
-                5, 0, vk::Format::eR32G32B32A32Sfloat,
+                6, 0, vk::Format::eR32G32B32A32Sfloat,
                 offsetof(GeometryVertex, jointWeights)),
         },
     };
@@ -124,7 +123,7 @@ protected:
                                   const RenderItem &renderItem) override {
     ShadowPassPushConstant push{
         .model = renderItem.modelMatrix,
-        .skinningEnabled = renderItem.skinningEnabled,
+        .skinningData = {renderItem.skinningEnabled, 0, 0, 0},
     };
     context.commandBuffer.pushConstants<ShadowPassPushConstant>(
         *pipelineLayoutHandle(), vk::ShaderStageFlagBits::eVertex, 0, {push});

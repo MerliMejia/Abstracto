@@ -2,17 +2,19 @@ struct VSInput {
     [[vk::location(0)]] float3 position;
     [[vk::location(1)]] float3 normal;
     [[vk::location(2)]] float2 uv;
-    [[vk::location(3)]] float4 tangent;
-    [[vk::location(4)]] uint4 jointIndices;
-    [[vk::location(5)]] float4 jointWeights;
+    [[vk::location(3)]] float4 color;
+    [[vk::location(4)]] float4 tangent;
+    [[vk::location(5)]] uint4 jointIndices;
+    [[vk::location(6)]] float4 jointWeights;
 };
 
 struct VSOutput {
     float4 position : SV_Position;
     [[vk::location(0)]] float3 normalWS;
     [[vk::location(1)]] float2 uv;
-    [[vk::location(2)]] float selectedJointWeight;
-    [[vk::location(3)]] float boneWeightDebugEnabled;
+    [[vk::location(2)]] float4 color;
+    [[vk::location(3)]] float selectedJointWeight;
+    [[vk::location(4)]] float boneWeightDebugEnabled;
 };
 
 struct GeometryData {
@@ -84,6 +86,7 @@ VSOutput vertMain(VSInput input) {
 
     o.normalWS = normalize(mul((float3x3)objectData.modelNormal, meshNormal));
     o.uv = input.uv;
+    o.color = input.color;
     o.selectedJointWeight = 0.0;
     o.boneWeightDebugEnabled = objectData.boneWeightDebugEnabled;
     if (objectData.boneWeightDebugEnabled != 0 &&
@@ -126,7 +129,9 @@ FSOutput fragMain(VSOutput input) {
     float3 emissiveSample = emissiveTexture.Sample(input.uv).rgb;
     float occlusionSample = occlusionTexture.Sample(input.uv).r;
 
-    float3 albedo = baseColorSample.rgb * materialParams.baseColorFactor.rgb;
+    float4 vertexColor = input.color;
+    float3 albedo =
+        baseColorSample.rgb * materialParams.baseColorFactor.rgb * vertexColor.rgb;
     float metallic =
         saturate(metallicRoughnessSample.b * materialParams.surfaceParams.x);
     float roughness =
@@ -137,7 +142,8 @@ FSOutput fragMain(VSOutput input) {
     float3 packedNormal = normalize(input.normalWS) * 0.5 + 0.5;
 
     o.gbuffer0 = float4(albedo,
-                        baseColorSample.a * materialParams.baseColorFactor.a);
+                        baseColorSample.a * materialParams.baseColorFactor.a *
+                            vertexColor.a);
     o.gbuffer1 = float4(packedNormal, 1.0);
     o.gbuffer2 = float4(metallic, roughness, occlusion, 1.0);
     o.gbuffer3 = float4(emissive, 1.0);

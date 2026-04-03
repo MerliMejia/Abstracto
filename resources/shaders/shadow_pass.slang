@@ -1,7 +1,7 @@
 struct VSInput {
     [[vk::location(0)]] float3 position;
-    [[vk::location(4)]] uint4 jointIndices;
-    [[vk::location(5)]] float4 jointWeights;
+    [[vk::location(5)]] uint4 jointIndices;
+    [[vk::location(6)]] float4 jointWeights;
 };
 
 struct ShadowPassData {
@@ -11,8 +11,7 @@ struct ShadowPassData {
 
 struct ShadowObjectData {
     float4x4 model;
-    int skinningEnabled;
-    float4 padding;
+    int4 skinningData;
 };
 
 struct SkinPaletteData {
@@ -27,7 +26,7 @@ ConstantBuffer<ShadowObjectData> shadowObject;
 [shader("vertex")]
 float4 vertMain(VSInput input) : SV_Position {
     float4 meshPosition = float4(input.position, 1.0);
-    if (shadowObject.skinningEnabled != 0) {
+    if (shadowObject.skinningData.x != 0) {
         meshPosition = 0.0;
         meshPosition += mul(skinPalette.joints[input.jointIndices.x], float4(input.position, 1.0)) * input.jointWeights.x;
         meshPosition += mul(skinPalette.joints[input.jointIndices.y], float4(input.position, 1.0)) * input.jointWeights.y;

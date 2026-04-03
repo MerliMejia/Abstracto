@@ -511,6 +511,7 @@ struct GeometryVertex {
   glm::vec3 pos;
   glm::vec3 normal;
   glm::vec2 texCoord;
+  glm::vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
   glm::vec4 tangent = {1.0f, 0.0f, 0.0f, 1.0f};
   glm::uvec4 jointIndices{0, 0, 0, 0};
   glm::vec4 jointWeights{1.0f, 0.0f, 0.0f, 0.0f};
@@ -519,7 +520,7 @@ struct GeometryVertex {
     return {0, sizeof(GeometryVertex), vk::VertexInputRate::eVertex};
   }
 
-  static std::array<vk::VertexInputAttributeDescription, 6>
+  static std::array<vk::VertexInputAttributeDescription, 7>
   getAttributeDescriptions() {
     return {
         vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,
@@ -530,12 +531,15 @@ struct GeometryVertex {
                                             offsetof(GeometryVertex, texCoord)),
         vk::VertexInputAttributeDescription(3, 0,
                                             vk::Format::eR32G32B32A32Sfloat,
-                                            offsetof(GeometryVertex, tangent)),
+                                            offsetof(GeometryVertex, color)),
         vk::VertexInputAttributeDescription(4, 0,
+                                            vk::Format::eR32G32B32A32Sfloat,
+                                            offsetof(GeometryVertex, tangent)),
+        vk::VertexInputAttributeDescription(5, 0,
                                             vk::Format::eR32G32B32A32Uint,
                                             offsetof(GeometryVertex,
                                                      jointIndices)),
-        vk::VertexInputAttributeDescription(5, 0,
+        vk::VertexInputAttributeDescription(6, 0,
                                             vk::Format::eR32G32B32A32Sfloat,
                                             offsetof(GeometryVertex,
                                                      jointWeights))};
@@ -543,7 +547,8 @@ struct GeometryVertex {
 
   bool operator==(const GeometryVertex &other) const {
     return pos == other.pos && normal == other.normal &&
-           texCoord == other.texCoord && tangent == other.tangent &&
+           texCoord == other.texCoord && color == other.color &&
+           tangent == other.tangent &&
            jointIndices == other.jointIndices &&
            jointWeights == other.jointWeights;
   }
@@ -555,6 +560,8 @@ template <> struct std::hash<GeometryVertex> {
     seed ^= hash<glm::vec3>()(vertex.normal) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);
     seed ^= hash<glm::vec2>()(vertex.texCoord) + 0x9e3779b9 + (seed << 6) +
+            (seed >> 2);
+    seed ^= hash<glm::vec4>()(vertex.color) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);
     seed ^= hash<glm::vec4>()(vertex.tangent) + 0x9e3779b9 + (seed << 6) +
             (seed >> 2);
