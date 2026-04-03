@@ -80,6 +80,11 @@ public:
   void setCustomMarkers(std::vector<DebugOverlayInstance> instances) {
     customMarkers = std::move(instances);
   }
+  void setToolMarkerMesh(Mesh &mesh) { toolMarkerMesh = &mesh; }
+  void setToolVisible(bool visible) { toolVisible = visible; }
+  void setToolMarkers(std::vector<DebugOverlayInstance> instances) {
+    toolMarkers = std::move(instances);
+  }
 
 protected:
   std::vector<DescriptorBindingSpec> descriptorBindings() const override {
@@ -164,6 +169,12 @@ protected:
       }
     }
 
+    if (toolVisible && toolMarkerMesh != nullptr) {
+      for (const auto &marker : toolMarkers) {
+        drawMarker(context, *toolMarkerMesh, marker.model, marker.color);
+      }
+    }
+
     if (!bonesVisible) {
       return;
     }
@@ -191,15 +202,18 @@ private:
   Mesh *boneSegmentMesh = nullptr;
   Mesh *boneJointMesh = nullptr;
   Mesh *customMarkerMesh = nullptr;
+  Mesh *toolMarkerMesh = nullptr;
   bool markersVisible = true;
   float markerScale = 0.35f;
   bool bonesVisible = true;
   bool customVisible = false;
+  bool toolVisible = false;
   std::vector<DebugOverlayMarker> lightMarkers;
   std::vector<DebugOverlayInstance> boneSegments;
   std::vector<DebugOverlayInstance> boneMarkers;
   std::vector<DebugOverlayInstance> customSegments;
   std::vector<DebugOverlayInstance> customMarkers;
+  std::vector<DebugOverlayInstance> toolMarkers;
 
   static glm::vec3 safeDirection(const glm::vec3 &direction,
                                  const glm::vec3 &fallback) {
