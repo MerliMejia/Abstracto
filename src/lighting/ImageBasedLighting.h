@@ -1,10 +1,10 @@
 #pragma once
 
-#include "renderer/resources/CubemapTexture.h"
-#include "renderer/resources/FloatTexture2D.h"
+#include "resources/CubemapTexture.h"
+#include "resources/FloatTexture2D.h"
 #include "ImageBasedLightingBaker.h"
 #include "ImageBasedLightingTypes.h"
-#include "renderer/resources/Sampler.h"
+#include "resources/Sampler.h"
 #include <algorithm>
 
 class ImageBasedLighting {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/core/SampledImageResource.h"
+#include "core/SampledImageResource.h"
 #include "RenderUtils.h"
 #include <cstdint>
 #include <cstring>

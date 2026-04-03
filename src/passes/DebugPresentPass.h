@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/core/FullscreenRenderPass.h"
+#include "core/FullscreenRenderPass.h"
 #include "GeometryPass.h"
 #include "ShadowPass.h"
 #include <array>

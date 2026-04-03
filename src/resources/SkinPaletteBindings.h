@@ -1,7 +1,7 @@
 #pragma once
 
-#include "renderer/core/PassUniformSet.h"
-#include "renderer/resources/DescriptorBindings.h"
+#include "core/PassUniformSet.h"
+#include "resources/DescriptorBindings.h"
 #include <array>
 
 constexpr uint32_t MAX_SKIN_JOINTS = 128;

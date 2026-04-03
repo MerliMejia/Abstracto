@@ -46,6 +46,12 @@ public:
     glfwGetFramebufferSize(window, &width, &height);
     return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
   }
+  WindowSize windowSize() const {
+    int width = 0;
+    int height = 0;
+    glfwGetWindowSize(window, &width, &height);
+    return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
+  }
 
 private:
   static void framebufferResizeCallback(GLFWwindow *window, int width,

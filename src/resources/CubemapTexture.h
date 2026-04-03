@@ -1,7 +1,7 @@
 #pragma once
 
-#include "renderer/core/SampledImageResource.h"
-#include "renderer/lighting/ImageBasedLightingTypes.h"
+#include "core/SampledImageResource.h"
+#include "lighting/ImageBasedLightingTypes.h"
 #include "RenderUtils.h"
 #include <cstddef>
 #include <cstdint>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/core/FullscreenRenderPass.h"
+#include "core/FullscreenRenderPass.h"
 #include <algorithm>
 #include <stdexcept>
 #include <vector>

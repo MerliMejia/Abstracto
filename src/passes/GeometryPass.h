@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/core/SceneRenderPass.h"
+#include "core/SceneRenderPass.h"
 #include "vulkan/vulkan.hpp"
 #include <vector>
 

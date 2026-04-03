@@ -1,8 +1,8 @@
 #pragma once
 
-#include "renderer/lighting/ImageBasedLighting.h"
-#include "renderer/core/FullscreenRenderPass.h"
-#include "renderer/core/PassUniformSet.h"
+#include "lighting/ImageBasedLighting.h"
+#include "core/FullscreenRenderPass.h"
+#include "core/PassUniformSet.h"
 #include "GeometryPass.h"
 #include "ShadowPass.h"
 #include <algorithm>

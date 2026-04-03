@@ -14,7 +14,7 @@ import vulkan_hpp;
 
 #include <stb_image.h>
 
-#include "renderer/core/SampledImageResource.h"
+#include "core/SampledImageResource.h"
 #include "./RenderUtils.h"
 
 enum class TextureEncoding {

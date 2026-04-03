@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/resources/Sampler.h"
+#include "resources/Sampler.h"
 #include "PassImageSet.h"
 #include "RasterRenderPass.h"
 

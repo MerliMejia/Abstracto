@@ -2,8 +2,8 @@
 
 #include "../backend/DeviceContext.h"
 #include "../backend/SwapchainContext.h"
-#include "renderer/resources/DescriptorBindings.h"
-#include "renderer/resources/Mesh.h"
+#include "resources/DescriptorBindings.h"
+#include "resources/Mesh.h"
 #include <vector>
 
 #include <glm/glm.hpp>

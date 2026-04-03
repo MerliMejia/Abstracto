@@ -1,8 +1,8 @@
 #pragma once
 
-#include "renderer/resources/Mesh.h"
-#include "renderer/core/PassUniformSet.h"
-#include "renderer/core/RasterRenderPass.h"
+#include "resources/Mesh.h"
+#include "core/PassUniformSet.h"
+#include "core/RasterRenderPass.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -72,6 +72,14 @@ public:
   void setLightMarkers(std::vector<DebugOverlayMarker> markers) {
     lightMarkers = std::move(markers);
   }
+  void setCustomMarkerMesh(Mesh &mesh) { customMarkerMesh = &mesh; }
+  void setCustomVisible(bool visible) { customVisible = visible; }
+  void setCustomSegments(std::vector<DebugOverlayInstance> instances) {
+    customSegments = std::move(instances);
+  }
+  void setCustomMarkers(std::vector<DebugOverlayInstance> instances) {
+    customMarkers = std::move(instances);
+  }
 
 protected:
   std::vector<DescriptorBindingSpec> descriptorBindings() const override {
@@ -140,6 +148,22 @@ protected:
       }
     }
 
+    if (customVisible) {
+      if (boneSegmentMesh != nullptr) {
+        for (const auto &segment : customSegments) {
+          drawMarker(context, *boneSegmentMesh, segment.model, segment.color);
+        }
+      }
+      if (boneJointMesh != nullptr) {
+        for (const auto &marker : customMarkers) {
+          drawMarker(context,
+                     customMarkerMesh != nullptr ? *customMarkerMesh
+                                                 : *boneJointMesh,
+                     marker.model, marker.color);
+        }
+      }
+    }
+
     if (!bonesVisible) {
       return;
     }
@@ -166,12 +190,16 @@ private:
   Mesh *directionalMarkerMesh = nullptr;
   Mesh *boneSegmentMesh = nullptr;
   Mesh *boneJointMesh = nullptr;
+  Mesh *customMarkerMesh = nullptr;
   bool markersVisible = true;
   float markerScale = 0.35f;
   bool bonesVisible = true;
+  bool customVisible = false;
   std::vector<DebugOverlayMarker> lightMarkers;
   std::vector<DebugOverlayInstance> boneSegments;
   std::vector<DebugOverlayInstance> boneMarkers;
+  std::vector<DebugOverlayInstance> customSegments;
+  std::vector<DebugOverlayInstance> customMarkers;
 
   static glm::vec3 safeDirection(const glm::vec3 &direction,
                                  const glm::vec3 &fallback) {

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "renderer/resources/Sampler.h"
-#include "renderer/core/UniformSceneRenderPass.h"
+#include "resources/Sampler.h"
+#include "core/UniformSceneRenderPass.h"
 #include <glm/glm.hpp>
 
 struct ShadowPassPushConstant {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/resources/Mesh.h"
+#include "resources/Mesh.h"
 #include <vector>
 
 inline TypedMesh<Vertex> buildPointLightMarkerMesh() {
@@ -79,6 +79,28 @@ inline TypedMesh<Vertex> buildDirectionalLightMarkerMesh() {
           4,
           1,
           5,
+      });
+  return mesh;
+}
+
+inline TypedMesh<Vertex> buildCubeMarkerMesh() {
+  TypedMesh<Vertex> mesh;
+  const glm::vec3 color(1.0f, 1.0f, 1.0f);
+  mesh.setGeometry(
+      {
+          {{-0.5f, -0.5f, -0.5f}, color, {0.0f, 0.0f}},
+          {{0.5f, -0.5f, -0.5f}, color, {0.0f, 0.0f}},
+          {{0.5f, 0.5f, -0.5f}, color, {0.0f, 0.0f}},
+          {{-0.5f, 0.5f, -0.5f}, color, {0.0f, 0.0f}},
+          {{-0.5f, -0.5f, 0.5f}, color, {0.0f, 0.0f}},
+          {{0.5f, -0.5f, 0.5f}, color, {0.0f, 0.0f}},
+          {{0.5f, 0.5f, 0.5f}, color, {0.0f, 0.0f}},
+          {{-0.5f, 0.5f, 0.5f}, color, {0.0f, 0.0f}},
+      },
+      {
+          0, 1, 1, 2, 2, 3, 3, 0,
+          4, 5, 5, 6, 6, 7, 7, 4,
+          0, 4, 1, 5, 2, 6, 3, 7,
       });
   return mesh;
 }

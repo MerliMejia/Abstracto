@@ -1,6 +1,6 @@
 #pragma once
 
-#include "renderer/resources/RenderUtils.h"
+#include "resources/RenderUtils.h"
 #include <cstring>
 #include <vector>
 

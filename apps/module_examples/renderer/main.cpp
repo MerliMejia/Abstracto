@@ -1,5 +1,5 @@
-#include "renderer/passes/DebugOverlayPass.h"
-#include "renderer/passes/PbrPass.h"
+#include "passes/DebugOverlayPass.h"
+#include "passes/PbrPass.h"
 
 int main() {
   PbrLightInput light{};

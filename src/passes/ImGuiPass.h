@@ -4,7 +4,7 @@
 #include "../backend/CommandContext.h"
 #include "../backend/InstanceContext.h"
 #include "../backend/SwapchainContext.h"
-#include "renderer/core/RenderPass.h"
+#include "core/RenderPass.h"
 #include <array>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_vulkan.h>

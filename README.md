@@ -72,17 +72,17 @@ Abstracto is a Vulkan renderer that turns the API's moving parts into named, reu
 
 ## Repo layout
 
-- `src/renderer/backend`
+- `src/backend`
   low-level Vulkan bootstrap and frame lifecycle
-- `src/renderer/core`
+- `src/core`
   reusable renderer and pass abstractions
-- `src/renderer/resources`
+- `src/resources`
   meshes, textures, samplers, descriptor-backed resources
-- `src/renderer/lighting`
+- `src/lighting`
   image-based lighting support and bake types
-- `src/renderer/debug`
+- `src/debug`
   renderer-side debug helper geometry
-- `src/renderer/passes`
+- `src/passes`
   concrete renderer features built on the core abstractions
 - `resources/shaders`
   Slang shaders and checked-in SPIR-V outputs
