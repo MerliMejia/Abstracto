@@ -41,6 +41,7 @@ struct MaterialData {
     float4 baseColorFactor;
     float4 emissiveFactor;
     float4 surfaceParams;
+    float4 paintParams;
 };
 
 struct FSOutput {
@@ -55,7 +56,8 @@ struct FSOutput {
 [[vk::binding(2, 0)]] Sampler2D metallicRoughnessTexture;
 [[vk::binding(3, 0)]] Sampler2D emissiveTexture;
 [[vk::binding(4, 0)]] Sampler2D occlusionTexture;
-[[vk::binding(5, 0)]] ConstantBuffer<MaterialData> materialParams;
+[[vk::binding(5, 0)]] Sampler2D paintCanvasTexture;
+[[vk::binding(6, 0)]] ConstantBuffer<MaterialData> materialParams;
 [[vk::binding(0, 1)]] ConstantBuffer<SkinPaletteData> skinPalette;
 [[vk::push_constant]]
 ConstantBuffer<GeometryObjectData> objectData;
@@ -128,10 +130,15 @@ FSOutput fragMain(VSOutput input) {
     float4 metallicRoughnessSample = metallicRoughnessTexture.Sample(input.uv);
     float3 emissiveSample = emissiveTexture.Sample(input.uv).rgb;
     float occlusionSample = occlusionTexture.Sample(input.uv).r;
+    float2 paintUv = saturate(float2(
+        input.uv.x / max(materialParams.paintParams.x, 1e-4),
+        input.uv.y / max(materialParams.paintParams.y, 1e-4)));
+    float4 paintSample = paintCanvasTexture.Sample(paintUv);
 
     float4 vertexColor = input.color;
-    float3 albedo =
+    float3 baseAlbedo =
         baseColorSample.rgb * materialParams.baseColorFactor.rgb * vertexColor.rgb;
+    float3 albedo = lerp(baseAlbedo, paintSample.rgb, saturate(paintSample.a));
     float metallic =
         saturate(metallicRoughnessSample.b * materialParams.surfaceParams.x);
     float roughness =

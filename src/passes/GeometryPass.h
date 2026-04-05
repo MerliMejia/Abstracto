@@ -48,7 +48,8 @@ protected:
             sampledImageBindingSpec(2, vk::ShaderStageFlagBits::eFragment),
             sampledImageBindingSpec(3, vk::ShaderStageFlagBits::eFragment),
             sampledImageBindingSpec(4, vk::ShaderStageFlagBits::eFragment),
-            {.binding = 5,
+            sampledImageBindingSpec(5, vk::ShaderStageFlagBits::eFragment),
+            {.binding = 6,
              .descriptorType = vk::DescriptorType::eUniformBuffer,
              .descriptorCount = 1,
              .stageFlags = vk::ShaderStageFlagBits::eFragment}};

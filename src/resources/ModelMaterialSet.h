@@ -57,6 +57,7 @@ private:
     Texture metallicRoughnessTexture;
     Texture emissiveTexture;
     Texture occlusionTexture;
+    Texture paintCanvasTexture;
     DescriptorBindings bindings;
   };
 
@@ -103,6 +104,8 @@ private:
         .emissiveFactor = glm::vec4(material.emissiveFactor, 1.0f),
         .surfaceParams = {material.metallicFactor, material.roughnessFactor,
                           0.0f, material.occlusionStrength},
+        .paintParams = {material.paintCanvasUvScale.x,
+                        material.paintCanvasUvScale.y, 0.0f, 0.0f},
     };
   }
 
@@ -132,13 +135,18 @@ private:
                             resolvedMaterial.occlusionTexture,
                             {255, 255, 255, 255}, TextureEncoding::Linear,
                             commandContext, deviceContext);
+    createTextureFromSource(resource.paintCanvasTexture,
+                            resolvedMaterial.paintCanvasTexture,
+                            {0, 0, 0, 0}, TextureEncoding::Srgb,
+                            commandContext, deviceContext);
 
     MaterialUniformData materialUniform = buildMaterialUniform(resolvedMaterial);
 
     resource.bindings.create(
         deviceContext, descriptorSetLayout, frameGeometryUniforms,
         resource.baseColorTexture, resource.metallicRoughnessTexture,
-        resource.emissiveTexture, resource.occlusionTexture, sampler,
+        resource.emissiveTexture, resource.occlusionTexture,
+        resource.paintCanvasTexture, sampler,
         materialUniform, framesInFlight);
   }
 

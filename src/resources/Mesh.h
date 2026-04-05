@@ -79,10 +79,12 @@ struct ModelMaterialData {
   TextureSource metallicRoughnessTexture;
   TextureSource emissiveTexture;
   TextureSource occlusionTexture;
+  TextureSource paintCanvasTexture;
   float metallicFactor = 0.0f;
   float roughnessFactor = 1.0f;
   glm::vec3 emissiveFactor = {0.0f, 0.0f, 0.0f};
   float occlusionStrength = 1.0f;
+  glm::vec2 paintCanvasUvScale = {1.0f, 1.0f};
   tinyobj::material_t raw{};
   bool hasObjMaterial = false;
 

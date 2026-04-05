@@ -200,14 +200,3 @@ target_link_libraries(
     ${ABSTRACTO_GLM_TARGET}
     imgui
 )
-
-target_link_libraries(Abstracto PRIVATE abstracto_renderer)
-if(TARGET abstracto_shaders)
-  add_dependencies(Abstracto abstracto_shaders)
-endif()
-
-target_link_libraries(
-  AbstractoRendererExample
-  PRIVATE
-    abstracto_renderer
-)

@@ -24,6 +24,7 @@ struct MaterialUniformData {
   alignas(16) glm::vec4 baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
   alignas(16) glm::vec4 emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};
   alignas(16) glm::vec4 surfaceParams{0.0f, 1.0f, 1.0f, 1.0f};
+  alignas(16) glm::vec4 paintParams{1.0f, 1.0f, 0.0f, 0.0f};
 };
 
 class DescriptorBindings : public FrameDescriptorBindings {
@@ -33,7 +34,7 @@ public:
               FrameGeometryUniforms &frameGeometryUniforms,
               Texture &baseColorTexture,
               Texture &metallicRoughnessTexture, Texture &emissiveTexture,
-              Texture &occlusionTexture,
+              Texture &occlusionTexture, Texture &paintCanvasTexture,
               Sampler &sampler, const MaterialUniformData &materialUniform,
               uint32_t framesInFlight) {
     createMaterialBuffer(deviceContext, materialUniform);
@@ -42,7 +43,7 @@ public:
         vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer,
                                framesInFlight * 2),
         vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler,
-                               framesInFlight * 4)};
+                               framesInFlight * 5)};
     vk::DescriptorPoolCreateInfo poolInfo{
         .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
         .maxSets = framesInFlight,
@@ -87,6 +88,10 @@ public:
           .sampler = sampler.handle(),
           .imageView = occlusionTexture.imageView(),
           .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
+      vk::DescriptorImageInfo paintCanvasImageInfo{
+          .sampler = sampler.handle(),
+          .imageView = paintCanvasTexture.imageView(),
+          .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal};
       std::array descriptorWrites{
           vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
                                  .dstBinding = 0,
@@ -125,6 +130,13 @@ public:
                                  .pImageInfo = &occlusionImageInfo},
           vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
                                  .dstBinding = 5,
+                                 .dstArrayElement = 0,
+                                 .descriptorCount = 1,
+                                 .descriptorType =
+                                     vk::DescriptorType::eCombinedImageSampler,
+                                 .pImageInfo = &paintCanvasImageInfo},
+          vk::WriteDescriptorSet{.dstSet = descriptorSets[i],
+                                 .dstBinding = 6,
                                  .dstArrayElement = 0,
                                  .descriptorCount = 1,
                                  .descriptorType =
