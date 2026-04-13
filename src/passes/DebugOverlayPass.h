@@ -80,6 +80,15 @@ public:
   void setCustomMarkers(std::vector<DebugOverlayInstance> instances) {
     customMarkers = std::move(instances);
   }
+  void setCharacterMarkerMesh(Mesh &mesh) { characterMarkerMesh = &mesh; }
+  void setCharacterSegmentMesh(Mesh &mesh) { characterSegmentMesh = &mesh; }
+  void setCharacterVisible(bool visible) { characterVisible = visible; }
+  void setCharacterMarkers(std::vector<DebugOverlayInstance> instances) {
+    characterMarkers = std::move(instances);
+  }
+  void setCharacterSegments(std::vector<DebugOverlayInstance> instances) {
+    characterSegments = std::move(instances);
+  }
   void setToolMarkerMesh(Mesh &mesh) { toolMarkerMesh = &mesh; }
   void setToolVisible(bool visible) { toolVisible = visible; }
   void setToolMarkers(std::vector<DebugOverlayInstance> instances) {
@@ -175,6 +184,20 @@ protected:
       }
     }
 
+    if (characterVisible) {
+      if (characterSegmentMesh != nullptr) {
+        for (const auto &segment : characterSegments) {
+          drawMarker(context, *characterSegmentMesh, segment.model,
+                     segment.color);
+        }
+      }
+      if (characterMarkerMesh != nullptr) {
+        for (const auto &marker : characterMarkers) {
+          drawMarker(context, *characterMarkerMesh, marker.model, marker.color);
+        }
+      }
+    }
+
     if (!bonesVisible) {
       return;
     }
@@ -202,17 +225,22 @@ private:
   Mesh *boneSegmentMesh = nullptr;
   Mesh *boneJointMesh = nullptr;
   Mesh *customMarkerMesh = nullptr;
+  Mesh *characterMarkerMesh = nullptr;
+  Mesh *characterSegmentMesh = nullptr;
   Mesh *toolMarkerMesh = nullptr;
   bool markersVisible = true;
   float markerScale = 0.35f;
   bool bonesVisible = true;
   bool customVisible = false;
+  bool characterVisible = false;
   bool toolVisible = false;
   std::vector<DebugOverlayMarker> lightMarkers;
   std::vector<DebugOverlayInstance> boneSegments;
   std::vector<DebugOverlayInstance> boneMarkers;
   std::vector<DebugOverlayInstance> customSegments;
   std::vector<DebugOverlayInstance> customMarkers;
+  std::vector<DebugOverlayInstance> characterMarkers;
+  std::vector<DebugOverlayInstance> characterSegments;
   std::vector<DebugOverlayInstance> toolMarkers;
 
   static glm::vec3 safeDirection(const glm::vec3 &direction,
