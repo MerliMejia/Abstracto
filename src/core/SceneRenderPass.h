@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RasterRenderPass.h"
+#include <array>
 
 class SceneRenderPass : public RasterRenderPass {
 public:
@@ -50,12 +51,23 @@ protected:
         renderItem.indexCount == 0
             ? static_cast<uint32_t>(renderItem.mesh->getIndices().size())
             : renderItem.indexCount;
-    context.commandBuffer.bindVertexBuffers(
-        0, *renderItem.mesh->getVertexBuffer(), {0});
+    const uint32_t instanceCount =
+        renderItem.instanceCount == 0 ? 1u : renderItem.instanceCount;
+    if (renderItem.instanceBuffer != nullptr) {
+      std::array<vk::Buffer, 2> vertexBuffers = {
+          *renderItem.mesh->getVertexBuffer(),
+          *renderItem.instanceBuffer->buffer(context.frameIndex),
+      };
+      std::array<vk::DeviceSize, 2> offsets = {0, 0};
+      context.commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
+    } else {
+      context.commandBuffer.bindVertexBuffers(
+          0, *renderItem.mesh->getVertexBuffer(), {0});
+    }
     context.commandBuffer.bindIndexBuffer(*renderItem.mesh->getIndexBuffer(), 0,
                                           vk::IndexType::eUint32);
-    context.commandBuffer.drawIndexed(indexCount, 1, renderItem.indexOffset, 0,
-                                      0);
+    context.commandBuffer.drawIndexed(indexCount, instanceCount,
+                                      renderItem.indexOffset, 0, 0);
   }
 
 private:

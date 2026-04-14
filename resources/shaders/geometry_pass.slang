@@ -6,6 +6,14 @@ struct VSInput {
     [[vk::location(4)]] float4 tangent;
     [[vk::location(5)]] uint4 jointIndices;
     [[vk::location(6)]] float4 jointWeights;
+    [[vk::location(7)]] float4 instanceModel0;
+    [[vk::location(8)]] float4 instanceModel1;
+    [[vk::location(9)]] float4 instanceModel2;
+    [[vk::location(10)]] float4 instanceModel3;
+    [[vk::location(11)]] float4 instanceModelNormal0;
+    [[vk::location(12)]] float4 instanceModelNormal1;
+    [[vk::location(13)]] float4 instanceModelNormal2;
+    [[vk::location(14)]] float4 instanceModelNormal3;
 };
 
 struct VSOutput {
@@ -25,8 +33,6 @@ struct GeometryData {
 };
 
 struct GeometryObjectData {
-    float4x4 model;
-    float4x4 modelNormal;
     int boneWeightJointIndex;
     int boneWeightDebugEnabled;
     int skinningEnabled;
@@ -65,6 +71,16 @@ ConstantBuffer<GeometryObjectData> objectData;
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput o;
+    float4x4 model = transpose(float4x4(
+        input.instanceModel0,
+        input.instanceModel1,
+        input.instanceModel2,
+        input.instanceModel3));
+    float4x4 modelNormal = transpose(float4x4(
+        input.instanceModelNormal0,
+        input.instanceModelNormal1,
+        input.instanceModelNormal2,
+        input.instanceModelNormal3));
     float4 meshPosition = float4(input.position, 1.0);
     float3 meshNormal = input.normal;
     if (objectData.skinningEnabled != 0) {
@@ -82,11 +98,11 @@ VSOutput vertMain(VSInput input) {
         meshNormal += mul((float3x3)skinPalette.joints[input.jointIndices.w], input.normal) * input.jointWeights.w;
     }
 
-    float4 worldPos = mul(objectData.model, meshPosition);
+    float4 worldPos = mul(model, meshPosition);
     float4 viewPos = mul(ubo.view, worldPos);
     o.position = mul(ubo.proj, viewPos);
 
-    o.normalWS = normalize(mul((float3x3)objectData.modelNormal, meshNormal));
+    o.normalWS = normalize(mul((float3x3)modelNormal, meshNormal));
     o.uv = input.uv;
     o.color = input.color;
     o.selectedJointWeight = 0.0;

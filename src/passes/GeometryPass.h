@@ -5,8 +5,6 @@
 #include <vector>
 
 struct GeometryPassPushConstant {
-  glm::mat4 model{1.0f};
-  glm::mat4 modelNormal{1.0f};
   int boneWeightJointIndex = -1;
   int boneWeightDebugEnabled = 0;
   int skinningEnabled = 0;
@@ -64,10 +62,17 @@ protected:
     }};
   }
   VertexInputLayoutSpec vertexInputLayout() const override {
-    auto attrs = GeometryVertex::getAttributeDescriptions();
+    auto vertexAttrs = GeometryVertex::getAttributeDescriptions();
+    auto instanceAttrs = RenderInstanceData::getAttributeDescriptions();
+    std::vector<vk::VertexInputAttributeDescription> attributes;
+    attributes.reserve(vertexAttrs.size() + instanceAttrs.size());
+    attributes.insert(attributes.end(), vertexAttrs.begin(), vertexAttrs.end());
+    attributes.insert(attributes.end(), instanceAttrs.begin(),
+                      instanceAttrs.end());
     return VertexInputLayoutSpec{
-        .bindings = {GeometryVertex::getBindingDescription()},
-        .attributes = {attrs.begin(), attrs.end()},
+        .bindings = {GeometryVertex::getBindingDescription(),
+                     RenderInstanceData::getBindingDescription()},
+        .attributes = std::move(attributes),
     };
   }
 
@@ -83,8 +88,6 @@ protected:
                                const RenderItem &renderItem) override {
     SceneRenderPass::bindRenderItemResources(context, renderItem);
     GeometryPassPushConstant push{
-        .model = renderItem.modelMatrix,
-        .modelNormal = renderItem.modelNormalMatrix,
         .boneWeightJointIndex = renderItem.boneWeightJointIndex,
         .boneWeightDebugEnabled = renderItem.boneWeightDebugEnabled,
         .skinningEnabled = renderItem.skinningEnabled,

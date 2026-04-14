@@ -3,7 +3,9 @@
 #include "../backend/DeviceContext.h"
 #include "../backend/SwapchainContext.h"
 #include "resources/DescriptorBindings.h"
+#include "resources/InstanceBuffer.h"
 #include "resources/Mesh.h"
+#include <memory>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -23,6 +25,8 @@ struct RenderItem {
   const RenderPass *targetPass = nullptr;
   uint32_t indexOffset = 0;
   uint32_t indexCount = 0;
+  std::shared_ptr<FrameInstanceBuffer> instanceBuffer;
+  uint32_t instanceCount = 1;
   glm::mat4 modelMatrix{1.0f};
   glm::mat4 modelNormalMatrix{1.0f};
   int boneWeightJointIndex = -1;

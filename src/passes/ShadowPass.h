@@ -5,7 +5,6 @@
 #include <glm/glm.hpp>
 
 struct ShadowPassPushConstant {
-  glm::mat4 model{1.0f};
   glm::ivec4 skinningData{0, 0, 0, 0};
 };
 
@@ -73,8 +72,10 @@ protected:
   }
 
   VertexInputLayoutSpec vertexInputLayout() const override {
+    auto instanceAttrs = RenderInstanceData::getAttributeDescriptions();
     return VertexInputLayoutSpec{
-        .bindings = {GeometryVertex::getBindingDescription()},
+        .bindings = {GeometryVertex::getBindingDescription(),
+                     RenderInstanceData::getBindingDescription()},
         .attributes = {
             vk::VertexInputAttributeDescription(
                 0, 0, vk::Format::eR32G32B32Sfloat,
@@ -85,6 +86,14 @@ protected:
             vk::VertexInputAttributeDescription(
                 6, 0, vk::Format::eR32G32B32A32Sfloat,
                 offsetof(GeometryVertex, jointWeights)),
+            instanceAttrs[0],
+            instanceAttrs[1],
+            instanceAttrs[2],
+            instanceAttrs[3],
+            instanceAttrs[4],
+            instanceAttrs[5],
+            instanceAttrs[6],
+            instanceAttrs[7],
         },
     };
   }
@@ -122,7 +131,6 @@ protected:
   void bindPerRenderItemResources(const RenderPassContext &context,
                                   const RenderItem &renderItem) override {
     ShadowPassPushConstant push{
-        .model = renderItem.modelMatrix,
         .skinningData = {renderItem.skinningEnabled, 0, 0, 0},
     };
     context.commandBuffer.pushConstants<ShadowPassPushConstant>(
