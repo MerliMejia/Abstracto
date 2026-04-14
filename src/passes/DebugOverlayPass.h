@@ -80,6 +80,11 @@ public:
   void setCustomMarkers(std::vector<DebugOverlayInstance> instances) {
     customMarkers = std::move(instances);
   }
+  void setSceneCameraMarkerMesh(Mesh &mesh) { sceneCameraMarkerMesh = &mesh; }
+  void setSceneCameraVisible(bool visible) { sceneCameraVisible = visible; }
+  void setSceneCameraMarkers(std::vector<DebugOverlayInstance> instances) {
+    sceneCameraMarkers = std::move(instances);
+  }
   void setCharacterMarkerMesh(Mesh &mesh) { characterMarkerMesh = &mesh; }
   void setCharacterSegmentMesh(Mesh &mesh) { characterSegmentMesh = &mesh; }
   void setCharacterVisible(bool visible) { characterVisible = visible; }
@@ -178,6 +183,12 @@ protected:
       }
     }
 
+    if (sceneCameraVisible && sceneCameraMarkerMesh != nullptr) {
+      for (const auto &marker : sceneCameraMarkers) {
+        drawMarker(context, *sceneCameraMarkerMesh, marker.model, marker.color);
+      }
+    }
+
     if (toolVisible && toolMarkerMesh != nullptr) {
       for (const auto &marker : toolMarkers) {
         drawMarker(context, *toolMarkerMesh, marker.model, marker.color);
@@ -225,6 +236,7 @@ private:
   Mesh *boneSegmentMesh = nullptr;
   Mesh *boneJointMesh = nullptr;
   Mesh *customMarkerMesh = nullptr;
+  Mesh *sceneCameraMarkerMesh = nullptr;
   Mesh *characterMarkerMesh = nullptr;
   Mesh *characterSegmentMesh = nullptr;
   Mesh *toolMarkerMesh = nullptr;
@@ -232,6 +244,7 @@ private:
   float markerScale = 0.35f;
   bool bonesVisible = true;
   bool customVisible = false;
+  bool sceneCameraVisible = false;
   bool characterVisible = false;
   bool toolVisible = false;
   std::vector<DebugOverlayMarker> lightMarkers;
@@ -239,6 +252,7 @@ private:
   std::vector<DebugOverlayInstance> boneMarkers;
   std::vector<DebugOverlayInstance> customSegments;
   std::vector<DebugOverlayInstance> customMarkers;
+  std::vector<DebugOverlayInstance> sceneCameraMarkers;
   std::vector<DebugOverlayInstance> characterMarkers;
   std::vector<DebugOverlayInstance> characterSegments;
   std::vector<DebugOverlayInstance> toolMarkers;
