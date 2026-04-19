@@ -4,6 +4,7 @@
 #include "RenderUtils.h"
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -41,16 +42,28 @@ public:
         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
         vk::MemoryPropertyFlagBits::eDeviceLocal, textureImage,
         textureImageMemory);
-    RenderUtils::transitionImageLayout(
-        commandContext, deviceContext, textureImage,
-        vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, 1,
-        1);
-    RenderUtils::copyBufferToImage(stagingBuffer, textureImage, width, height,
-                                   commandContext, deviceContext);
-    RenderUtils::transitionImageLayout(
-        commandContext, deviceContext, textureImage,
+
+    std::unique_ptr<vk::raii::CommandBuffer> commandBuffer =
+        RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
+    RenderUtils::recordImageLayoutTransition(
+        *commandBuffer, textureImage,
+        vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, 1, 1);
+    RenderUtils::recordCopyBufferToImage(
+        *commandBuffer, stagingBuffer, textureImage,
+        std::vector<vk::BufferImageCopy>{
+            vk::BufferImageCopy{.bufferOffset = 0,
+                                .bufferRowLength = 0,
+                                .bufferImageHeight = 0,
+                                .imageSubresource = {vk::ImageAspectFlagBits::eColor,
+                                                     0, 0, 1},
+                                .imageOffset = {0, 0, 0},
+                                .imageExtent = {width, height, 1}}});
+    RenderUtils::recordImageLayoutTransition(
+        *commandBuffer, textureImage,
         vk::ImageLayout::eTransferDstOptimal,
         vk::ImageLayout::eShaderReadOnlyOptimal, 1, 1);
+    RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
+                                       *commandBuffer);
 
     vk::ImageViewCreateInfo viewInfo{
         .image = textureImage,

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -75,16 +76,21 @@ public:
         vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
         vk::MemoryPropertyFlagBits::eDeviceLocal, textureImage,
         textureImageMemory, vk::ImageCreateFlagBits::eCubeCompatible);
-    RenderUtils::transitionImageLayout(
-        commandContext, deviceContext, textureImage,
+
+    std::unique_ptr<vk::raii::CommandBuffer> commandBuffer =
+        RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
+    RenderUtils::recordImageLayoutTransition(
+        *commandBuffer, textureImage,
         vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
         mipLevelCountValue, 6);
-    RenderUtils::copyBufferToImage(stagingBuffer, textureImage, copyRegions,
-                                   commandContext, deviceContext);
-    RenderUtils::transitionImageLayout(
-        commandContext, deviceContext, textureImage,
+    RenderUtils::recordCopyBufferToImage(*commandBuffer, stagingBuffer,
+                                         textureImage, copyRegions);
+    RenderUtils::recordImageLayoutTransition(
+        *commandBuffer, textureImage,
         vk::ImageLayout::eTransferDstOptimal,
         vk::ImageLayout::eShaderReadOnlyOptimal, mipLevelCountValue, 6);
+    RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
+                                       *commandBuffer);
 
     vk::ImageViewCreateInfo viewInfo{
         .image = textureImage,

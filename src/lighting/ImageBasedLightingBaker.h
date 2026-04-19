@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <numbers>
 #include <set>
 #include <sstream>
@@ -204,6 +205,7 @@ private:
                                BakedImageBasedLightingData &bakedData) {
     const std::filesystem::path cachePath = bakeCachePath(settings);
     if (!std::filesystem::exists(cachePath)) {
+      std::cout << "IBL cache miss: " << cachePath.string() << "\n";
       return false;
     }
 
@@ -227,8 +229,13 @@ private:
       return false;
     }
 
-    return brdfDimensions.width == settings.brdfResolution &&
-           brdfDimensions.height == settings.brdfResolution && stream.good();
+    const bool loaded = brdfDimensions.width == settings.brdfResolution &&
+                        brdfDimensions.height == settings.brdfResolution &&
+                        stream.good();
+    if (loaded) {
+      std::cout << "IBL cache hit: " << cachePath.string() << "\n";
+    }
+    return loaded;
   }
 
   static void saveBakeCache(const ImageBasedLightingBakeSettings &settings,
@@ -248,6 +255,7 @@ private:
     writeBinary(stream, settings.brdfResolution);
     writeBinary(stream, settings.brdfResolution);
     writeFloatVector(stream, bakedData.brdfLut);
+    std::cout << "IBL cache saved: " << cachePath.string() << "\n";
   }
 
   static EnvironmentSource

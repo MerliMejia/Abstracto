@@ -95,7 +95,17 @@ public:
                                     uint32_t arrayLayers = 1) {
     const auto commandBuffer =
         RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
+    recordImageLayoutTransition(*commandBuffer, image, oldLayout, newLayout,
+                                mipLevels, arrayLayers);
+    RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
+                                       *commandBuffer);
+  }
 
+  static void recordImageLayoutTransition(
+      vk::raii::CommandBuffer &commandBuffer,
+      const vk::raii::Image &image, const vk::ImageLayout oldLayout,
+      const vk::ImageLayout newLayout, uint32_t mipLevels,
+      uint32_t arrayLayers = 1) {
     vk::ImageMemoryBarrier barrier{
         .oldLayout = oldLayout,
         .newLayout = newLayout,
@@ -123,10 +133,8 @@ public:
     } else {
       throw std::invalid_argument("unsupported layout transition!");
     }
-    commandBuffer->pipelineBarrier(sourceStage, destinationStage, {}, {},
-                                   nullptr, barrier);
-    RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
-                                       *commandBuffer);
+    commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {},
+                                  nullptr, barrier);
   }
 
   static void copyBufferToImage(const vk::raii::Buffer &buffer,
@@ -153,9 +161,16 @@ public:
                                 DeviceContext &deviceContext) {
     std::unique_ptr<vk::raii::CommandBuffer> commandBuffer =
         RenderUtils::beginSingleTimeCommands(commandContext, deviceContext);
-    commandBuffer->copyBufferToImage(
-        buffer, image, vk::ImageLayout::eTransferDstOptimal, regions);
+    recordCopyBufferToImage(*commandBuffer, buffer, image, regions);
     RenderUtils::endSingleTimeCommands(commandContext, deviceContext,
                                        *commandBuffer);
+  }
+
+  static void recordCopyBufferToImage(
+      vk::raii::CommandBuffer &commandBuffer,
+      const vk::raii::Buffer &buffer, const vk::raii::Image &image,
+      const std::vector<vk::BufferImageCopy> &regions) {
+    commandBuffer.copyBufferToImage(
+        buffer, image, vk::ImageLayout::eTransferDstOptimal, regions);
   }
 };
