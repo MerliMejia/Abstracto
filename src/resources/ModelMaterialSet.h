@@ -51,6 +51,28 @@ public:
     }
   }
 
+  bool canUpdatePaintCanvasTexture(size_t materialIndex, int width,
+                                   int height) const {
+    if (materialIndex >= materialResources.size()) {
+      return false;
+    }
+    return materialResources[materialIndex].paintCanvasTexture.isCompatibleRgba(
+        width, height, TextureEncoding::Srgb);
+  }
+
+  bool recordPaintCanvasTextureUpdate(
+      size_t materialIndex, DeviceContext &deviceContext,
+      vk::raii::CommandBuffer &commandBuffer, uint32_t frameIndex,
+      const uint8_t *rgbaPixels, int sourceWidth, int sourceHeight, int x, int y,
+      int width, int height) {
+    if (materialIndex >= materialResources.size()) {
+      return false;
+    }
+    return materialResources[materialIndex].paintCanvasTexture.recordRgbaUpdate(
+        deviceContext, commandBuffer, frameIndex, rgbaPixels, sourceWidth,
+        sourceHeight, x, y, width, height, TextureEncoding::Srgb);
+  }
+
 private:
   struct MaterialResource {
     Texture baseColorTexture;
@@ -79,22 +101,23 @@ private:
   static void createTextureFromSource(
       Texture &texture, const ModelMaterialData::TextureSource &textureSource,
       const std::array<uint8_t, 4> &fallbackColor, TextureEncoding encoding,
-      CommandContext &commandContext, DeviceContext &deviceContext) {
+      CommandContext &commandContext, DeviceContext &deviceContext,
+      bool generateTextureMipmaps = true) {
     if (hasAvailableTexture(textureSource)) {
       texture.create(textureSource.resolvedPath, commandContext, deviceContext,
-                     encoding);
+                     encoding, generateTextureMipmaps);
       return;
     }
 
     if (textureSource.hasEmbeddedRgba()) {
       texture.createRgba(textureSource.rgba.data(), textureSource.width,
                          textureSource.height, commandContext, deviceContext,
-                         encoding);
+                         encoding, generateTextureMipmaps);
       return;
     }
 
     texture.createSolidColor(fallbackColor, commandContext, deviceContext,
-                             encoding);
+                             encoding, generateTextureMipmaps);
   }
 
   static MaterialUniformData
@@ -138,7 +161,7 @@ private:
     createTextureFromSource(resource.paintCanvasTexture,
                             resolvedMaterial.paintCanvasTexture,
                             {0, 0, 0, 0}, TextureEncoding::Srgb,
-                            commandContext, deviceContext);
+                            commandContext, deviceContext, false);
 
     MaterialUniformData materialUniform = buildMaterialUniform(resolvedMaterial);
 

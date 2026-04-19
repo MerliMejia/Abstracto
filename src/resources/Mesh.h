@@ -136,6 +136,7 @@ public:
     }
 
     vk::DeviceSize bufferSize = vertexBytes.size();
+    vertexBufferSize = bufferSize;
     vk::raii::Buffer stagingBuffer({});
     vk::raii::DeviceMemory stagingBufferMemory({});
     RenderUtils::createBuffer(deviceContext, bufferSize,
@@ -156,6 +157,7 @@ public:
 
     RenderUtils::copyBuffer(commandContext, deviceContext, stagingBuffer,
                             vertexBuffer, bufferSize);
+    frameVertexUploads.clear();
   }
 
   void createIndexBuffer(CommandContext &commandContext,
@@ -200,6 +202,60 @@ public:
   size_t vertexCount() const { return vertexCountValue; }
   size_t vertexStride() const { return vertexStrideValue; }
 
+  bool recordVertexBufferUpdate(DeviceContext &deviceContext,
+                                vk::raii::CommandBuffer &commandBuffer,
+                                uint32_t frameIndex) {
+    if (vertexBuffer == nullptr || vertexBytes.empty() ||
+        vertexBufferSize != vertexBytes.size()) {
+      return false;
+    }
+
+    if (frameVertexUploads.size() <= frameIndex) {
+      frameVertexUploads.resize(static_cast<size_t>(frameIndex) + 1u);
+    }
+    frameVertexUploads[frameIndex].clear();
+
+    StagedBufferUpload upload;
+    RenderUtils::createBuffer(deviceContext, vertexBufferSize,
+                              vk::BufferUsageFlagBits::eTransferSrc,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                                  vk::MemoryPropertyFlagBits::eHostCoherent,
+                              upload.buffer, upload.memory);
+
+    void *data = upload.memory.mapMemory(0, vertexBufferSize);
+    std::memcpy(data, vertexBytes.data(), vertexBytes.size());
+    upload.memory.unmapMemory();
+
+    frameVertexUploads[frameIndex].push_back(std::move(upload));
+    const StagedBufferUpload &stagedUpload = frameVertexUploads[frameIndex].back();
+
+    vk::BufferMemoryBarrier readToTransferBarrier{
+        .srcAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
+        .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+        .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+        .buffer = vertexBuffer,
+        .offset = 0,
+        .size = vertexBufferSize};
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eVertexInput,
+                                  vk::PipelineStageFlagBits::eTransfer, {},
+                                  {}, readToTransferBarrier, {});
+    commandBuffer.copyBuffer(stagedUpload.buffer, vertexBuffer,
+                             vk::BufferCopy{.size = vertexBufferSize});
+    vk::BufferMemoryBarrier transferToReadBarrier{
+        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .dstAccessMask = vk::AccessFlagBits::eVertexAttributeRead,
+        .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
+        .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
+        .buffer = vertexBuffer,
+        .offset = 0,
+        .size = vertexBufferSize};
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                                  vk::PipelineStageFlagBits::eVertexInput, {},
+                                  {}, transferToReadBarrier, {});
+    return true;
+  }
+
 protected:
   template <typename TVertex>
   void setTypedGeometry(std::vector<TVertex> meshVertices,
@@ -232,16 +288,23 @@ protected:
   }
 
 private:
+  struct StagedBufferUpload {
+    vk::raii::Buffer buffer = nullptr;
+    vk::raii::DeviceMemory memory = nullptr;
+  };
+
   std::vector<std::byte> vertexBytes;
   std::vector<uint32_t> indices;
   std::vector<ModelMaterialData> materials;
   std::vector<ModelSubmesh> submeshes;
   size_t vertexStrideValue = 0;
   size_t vertexCountValue = 0;
+  vk::DeviceSize vertexBufferSize = 0;
   vk::raii::Buffer vertexBuffer = nullptr;
   vk::raii::DeviceMemory vertexBufferMemory = nullptr;
   vk::raii::Buffer indexBuffer = nullptr;
   vk::raii::DeviceMemory indexBufferMemory = nullptr;
+  std::vector<std::vector<StagedBufferUpload>> frameVertexUploads;
 };
 
 template <typename TVertex> class TypedMesh : public Mesh {
@@ -584,6 +647,12 @@ public:
     computeTangents(meshVertices, meshIndices);
     setGeometry(std::move(meshVertices), std::move(meshIndices));
     setModelMetadata(std::move(meshSubmeshes), std::move(meshMaterials));
+  }
+
+  void setImportedVertices(std::vector<GeometryVertex> meshVertices) {
+    std::vector<uint32_t> meshIndices = getIndices();
+    computeTangents(meshVertices, meshIndices);
+    setGeometry(std::move(meshVertices), std::move(meshIndices));
   }
 
 private:
